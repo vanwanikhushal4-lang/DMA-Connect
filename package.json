@@ -31,6 +31,7 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "~57.0.2",
+    "firebase-admin": "^13.10.0",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -41,7 +42,9 @@
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
-    "test:rules": "npx --yes firebase-tools@latest emulators:exec --only firestore --project demo-dma-connect \"node --test tests/firestore-rules.mjs\""
+    "test:rules": "npx --yes firebase-tools@latest emulators:exec --only firestore --project demo-dma-connect \"node --test tests/firestore-rules.mjs\"",
+    "create:admin": "node scripts/create-admin.mjs",
+    "revoke:admin": "node scripts/create-admin.mjs --revoke"
   },
   "private": true,
   "engines": {

@@ -5,6 +5,12 @@
       "queryScope": "COLLECTION",
       "density": "SPARSE_ANY",
       "fields": [{ "fieldPath": "createdAt", "order": "DESCENDING" }]
+    },
+    {
+      "collectionGroup": "members",
+      "queryScope": "COLLECTION_GROUP",
+      "density": "SPARSE_ANY",
+      "fields": [{ "fieldPath": "createdAt", "order": "DESCENDING" }]
     }
   ],
   "fieldOverrides": []

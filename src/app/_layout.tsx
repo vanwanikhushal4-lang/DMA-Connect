@@ -19,15 +19,17 @@ export default function RootLayout() {
   return <SessionProvider><RootNavigator fontsReady={loaded || !!error} /></SessionProvider>;
 }
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
-  const { profile, loading } = useSession();
+  const { profile, isAdmin, loading } = useSession();
   const [splashDone, setSplashDone] = useState(false);
   const finishSplash = useCallback(() => setSplashDone(true), []);
+  // Admin users have no president profile — isAdmin alone is sufficient to grant workspace access.
+  const hasAccess = !!profile || isAdmin;
   return <View style={styles.root}>
     <StatusBar style="dark" />
     <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: colors.background } }}>
       <Stack.Screen name="index" />
-      <Stack.Protected guard={!profile}><Stack.Screen name="account" /></Stack.Protected>
-      <Stack.Protected guard={!!profile}><Stack.Screen name="(tabs)" /></Stack.Protected>
+      <Stack.Protected guard={!hasAccess}><Stack.Screen name="account" /></Stack.Protected>
+      <Stack.Protected guard={hasAccess}><Stack.Screen name="(tabs)" /></Stack.Protected>
     </Stack>
     {!splashDone && <StartupSplash ready={fontsReady && !loading} onFinished={finishSplash} />}
   </View>;

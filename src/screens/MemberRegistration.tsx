@@ -29,9 +29,11 @@ export function MemberRegistration() {
   const compact = width < 540;
   const { members, loading, saving, storageError, loadMembers, addMember } = useMembers();
   const { profile } = useSession();
-  const assignedTaluka = profile && needsTaluka(profile.role) ? profile.taluka : '';
+  const assignedTaluka = profile && needsTaluka(profile.role) ? profile.taluka : (profile?.taluka || '');
+  const isTalukaLocked = !!(profile && needsTaluka(profile.role) && profile.taluka);
   const entrance = useEntrance();
   const [draft, setDraft] = useState<MemberDraft>({ ...emptyDraft, taluka: assignedTaluka });
+  const currentTaluka = isTalukaLocked ? assignedTaluka : (draft.taluka || assignedTaluka);
   const [errors, setErrors] = useState<FieldErrors>({});
   const [saveError, setSaveError] = useState('');
   const [successName, setSuccessName] = useState('');
@@ -65,7 +67,7 @@ export function MemberRegistration() {
   }
 
   function clearForm() {
-    setDraft({ ...emptyDraft, taluka: assignedTaluka });
+    setDraft({ ...emptyDraft, taluka: isTalukaLocked ? assignedTaluka : '' });
     setErrors({});
     setSaveError('');
     setSuccessName('');
@@ -76,7 +78,9 @@ export function MemberRegistration() {
     if (disabled) return;
     setSaveError('');
     setSuccessName('');
-    const nextErrors = validateMember(draft, members);
+    const finalTaluka = isTalukaLocked ? assignedTaluka : (draft.taluka || assignedTaluka).trim();
+    const candidateDraft = { ...draft, taluka: finalTaluka };
+    const nextErrors = validateMember(candidateDraft, members);
     setErrors(nextErrors);
     const firstError = fieldOrder.find(field => nextErrors[field]);
     if (firstError) {
@@ -84,8 +88,8 @@ export function MemberRegistration() {
       return;
     }
     try {
-      const member = await addMember(draft);
-      setDraft({ ...emptyDraft, taluka: assignedTaluka });
+      const member = await addMember(candidateDraft);
+      setDraft({ ...emptyDraft, taluka: isTalukaLocked ? assignedTaluka : '' });
       setErrors({});
       setSuccessName(member.name);
       scroll.current?.scrollTo({ y: 0, animated: true });
@@ -96,7 +100,7 @@ export function MemberRegistration() {
   }
 
   const common = (field: keyof MemberDraft) => ({
-    value: draft[field], error: errors[field], editable: !saving,
+    value: field === 'taluka' ? currentTaluka : draft[field], error: errors[field], editable: !saving,
     onChangeText: (value: string) => update(field, value),
     returnKeyType: 'next' as const, submitBehavior: 'submit' as const,
   });
@@ -153,7 +157,7 @@ export function MemberRegistration() {
                   <MemberField ref={residenceRef} {...common('residence')} label="Residence" icon={MapPin} placeholder="House / street, village or city" multiline autoCapitalize="sentences" autoComplete="off" maxLength={500} submitBehavior="newline" />
                   <View style={[styles.fieldRow, compact && styles.fieldRowCompact]}>
                     <MemberField ref={dobRef} {...common('dob')} onSubmitEditing={() => talukaRef.current?.focus()} label="Date of birth" icon={CalendarDays} placeholder="DD / MM / YYYY" keyboardType="number-pad" maxLength={10} onChangeText={value => update('dob', formatDobInput(value))} onIconPress={() => setDatePickerOpen(true)} iconLabel="Choose date of birth" accessibilityHint="Enter day, month and year, or use the date picker." />
-                    <MemberField ref={talukaRef} {...common('taluka')} editable={!saving && !assignedTaluka} accessibilityHint={assignedTaluka ? 'Your assigned taluka' : undefined} label="Taluka" icon={MapPin} placeholder="Enter taluka" autoCapitalize="words" maxLength={100} returnKeyType="done" onSubmitEditing={() => void saveMember()} />
+                    <MemberField ref={talukaRef} {...common('taluka')} editable={!saving && !isTalukaLocked} accessibilityHint={isTalukaLocked ? 'Your assigned taluka' : undefined} label="Taluka" icon={MapPin} placeholder="Enter taluka" autoCapitalize="words" maxLength={100} returnKeyType="done" onSubmitEditing={() => void saveMember()} />
                   </View>
                   <Text style={styles.requiredNote}><Text style={styles.requiredStar}>*</Text> Required fields. Email is optional.</Text>
                   {!!saveError && <View style={styles.errorBanner} accessibilityRole="alert"><Text style={styles.bannerErrorText}>{saveError}</Text></View>}

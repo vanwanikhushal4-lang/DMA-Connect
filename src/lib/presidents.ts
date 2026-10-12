@@ -7,7 +7,7 @@ export const presidentRoles = [
   { value: 'cell', label: 'Cell president', description: 'Represent your foundation cell' },
 ] as const;
 
-export type PresidentRole = typeof presidentRoles[number]['value'];
+export type PresidentRole = typeof presidentRoles[number]['value'] | 'admin';
 export type PresidentDraft = {
   name: string; email: string; mobile: string; role: PresidentRole | '';
   district: string; taluka: string; locality: string; cell: string;
@@ -15,7 +15,10 @@ export type PresidentDraft = {
 export type President = PresidentDraft & { uid: string; createdAt: string };
 export const emptyPresident: PresidentDraft = { name: '', email: '', mobile: '', role: '', district: '', taluka: '', locality: '', cell: '' };
 
-export function roleLabel(role: string) { return presidentRoles.find(item => item.value === role)?.label || 'President'; }
+export function roleLabel(role: string) {
+  if (role === 'admin') return 'Administrator';
+  return presidentRoles.find(item => item.value === role)?.label || 'President';
+}
 export function needsTaluka(role: string) { return ['taluka', 'ward', 'village'].includes(role); }
 export function localityLabel(role: string) { return role === 'ward' ? 'Ward' : role === 'village' ? 'Village' : 'City'; }
 export function presidentArea(profile: PresidentDraft) { return [profile.locality || profile.cell || profile.taluka, profile.district].filter(Boolean).join(', '); }

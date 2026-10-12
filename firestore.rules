@@ -37,15 +37,30 @@ service cloud.firestore {
         && d.dob is timestamp && d.dob >= timestamp.date(1900,1,1) && d.dob < request.time + duration.value(1, 'd')
         && d.createdAt is timestamp && d.createdAt == request.time;
     }
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.get('admin', false) == true ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/presidents/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/presidents/$(request.auth.uid)).data.get('role', '') == 'admin')
+      );
+    }
+    match /admins/{uid} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
     match /presidents/{uid} {
-      allow read: if isOwner(uid);
+      allow read: if isOwner(uid) || isAdmin();
       allow create: if isOwner(uid) && isValidPresident(request.resource.data, uid);
-      allow update, delete: if false;
+      allow update, delete: if isAdmin();
       match /members/{mobile} {
-        allow read: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid));
+        allow read: if (isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid))) || isAdmin();
         allow create: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid)) && isValidMember(request.resource.data, uid, mobile);
-        allow update, delete: if false;
+        allow update, delete: if isAdmin();
       }
+    }
+    match /{path=**}/members/{mobile} {
+      allow read, update, delete: if isAdmin();
     }
     match /{document=**} { allow read, write: if false; }
   }

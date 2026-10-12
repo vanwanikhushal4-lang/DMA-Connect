@@ -44,3 +44,6 @@ firestore-debug.log*
 
 # Local inspection and verification artifacts
 tmp/
+
+# Firebase Admin SDK service account key — NEVER commit this
+scripts/serviceAccountKey.json

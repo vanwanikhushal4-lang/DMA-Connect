@@ -26,6 +26,10 @@ export function WorkspaceTabs() {
         <NativeTabs.Trigger.Icon sf={{ default: 'chart.bar', selected: 'chart.bar.fill' }} />
         <NativeTabs.Trigger.Label>Statistics</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="profile" accessibilityLabel="Account tab" contentStyle={{ backgroundColor: colors.background }}>
+        <NativeTabs.Trigger.Icon sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} />
+        <NativeTabs.Trigger.Label>Account</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

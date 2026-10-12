@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { ChartNoAxesCombined, UserRoundPlus } from 'lucide-react-native';
+import { ChartNoAxesCombined, UserRound, UserRoundPlus } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useWindowDimensions } from 'react-native';
 import { colors, fonts } from '../theme';
@@ -14,5 +14,6 @@ export function WorkspaceTabs() {
   }}>
     <Tabs.Screen name="index" options={{ title: 'Add member', tabBarAccessibilityLabel: 'Add member tab', tabBarIcon: ({ color, focused }) => <UserRoundPlus size={23} color={color} strokeWidth={focused ? 2 : 1.6} /> }} />
     <Tabs.Screen name="statistics" options={{ title: 'Statistics', tabBarAccessibilityLabel: 'Statistics tab', tabBarIcon: ({ color, focused }) => <ChartNoAxesCombined size={23} color={color} strokeWidth={focused ? 2 : 1.6} /> }} />
+    <Tabs.Screen name="profile" options={{ title: 'Account', tabBarAccessibilityLabel: 'Account tab', tabBarIcon: ({ color, focused }) => <UserRound size={23} color={color} strokeWidth={focused ? 2 : 1.6} /> }} />
   </Tabs>;
 }

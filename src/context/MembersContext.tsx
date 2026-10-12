@@ -11,7 +11,7 @@ import { friendlyFirebaseError } from '../lib/firebase-errors';
 type Value = { members: Member[]; loading: boolean; saving: boolean; storageError: string; loadMembers: () => void; addMember: (draft: MemberDraft) => Promise<Member> };
 const MembersContext = createContext<Value | null>(null);
 export function MembersProvider({ children }: PropsWithChildren) {
-  const { profile } = useSession();
+  const { profile, isAdmin } = useSession();
   const uid = profile?.uid;
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,7 +20,9 @@ export function MembersProvider({ children }: PropsWithChildren) {
   const [retry, setRetry] = useState(0);
   const locked = useRef(false);
   useEffect(() => {
-    if (!uid) return;
+    // Admin users have no president profile — mark as done immediately.
+    if (!uid) { setLoading(false); setMembers([]); return; }
+    setLoading(true);
     // Real-time snapshots are required: both tabs reflect cloud changes immediately.
     const membersQuery = query(collection(db, 'presidents', uid, 'members'), orderBy('createdAt', 'desc'));
     return onSnapshot(membersQuery, snapshot => {
@@ -38,9 +40,12 @@ export function MembersProvider({ children }: PropsWithChildren) {
   async function addMember(draft: MemberDraft): Promise<Member> {
     if (!profile || loading || storageError) throw new Error('Wait for your member records to load, then try again.');
     if (locked.current) throw new Error('A member is already being saved.');
-    const normalized = normalizeDraft(draft);
+    const normalized = normalizeDraft({
+      ...draft,
+      taluka: needsTaluka(profile.role) && profile.taluka ? profile.taluka : draft.taluka,
+    });
     if (Object.keys(validateMember(normalized, members)).length) throw new Error('Please check the member details.');
-    if (needsTaluka(profile.role) && normalized.taluka !== profile.taluka) throw new Error('Use the taluka assigned to your account.');
+    if (needsTaluka(profile.role) && profile.taluka && normalized.taluka !== profile.taluka) throw new Error('Use the taluka assigned to your account.');
     locked.current = true; setSaving(true);
     try {
       const dob = parseDob(normalized.dob)!;
