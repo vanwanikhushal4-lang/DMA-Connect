@@ -1,0 +1,52 @@
+// presidents/{uid}: private registration profile. A president's chosen role is
+// descriptive only; it never grants access to another president's data.
+// presidents/{uid}/members/{mobile}: immutable member record, unique mobile per
+// president. Auth UID and document path enforce ownership.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
+    function validString(value, min, max) { return value is string && value.size() >= min && value.size() <= max; }
+    function validEmail(value) { return validString(value, 3, 254) && value.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'); }
+    function isValidPresident(d, uid) {
+      return d.keys().hasAll(['uid','name','email','mobile','role','district','taluka','locality','cell','createdAt'])
+        && d.keys().hasOnly(['uid','name','email','mobile','role','district','taluka','locality','cell','createdAt'])
+        && d.uid == uid && validString(d.uid, 1, 128)
+        && validString(d.name, 1, 120) && validEmail(d.email) && d.email == request.auth.token.email
+        && validString(d.mobile, 10, 10) && d.mobile.matches('^[6-9][0-9]{9}$')
+        && d.role in ['district','taluka','city','ward','village','cell']
+        && validString(d.district, 1, 100) && validString(d.taluka, 0, 100)
+        && validString(d.locality, 0, 100) && validString(d.cell, 0, 100)
+        && (!(d.role in ['taluka','ward','village']) || d.taluka.size() > 0)
+        && (!(d.role in ['city','ward','village']) || d.locality.size() > 0)
+        && (d.role != 'cell' || d.cell.size() > 0)
+        && d.createdAt is timestamp && d.createdAt == request.time;
+    }
+    function isValidMember(d, uid, mobile) {
+      let profile = get(/databases/$(database)/documents/presidents/$(uid)).data;
+      return d.keys().hasAll(['name','email','mobile','residence','dob','taluka','ownerUid','createdAt'])
+        && d.keys().hasOnly(['name','email','mobile','residence','dob','taluka','ownerUid','createdAt'])
+        && d.ownerUid == uid && validString(d.ownerUid, 1, 128)
+        && validString(d.name, 1, 120)
+        && validString(d.email, 0, 254) && (d.email == '' || validEmail(d.email))
+        && validString(d.mobile, 10, 10) && d.mobile == mobile && d.mobile.matches('^[6-9][0-9]{9}$')
+        && validString(d.residence, 1, 500) && validString(d.taluka, 1, 100)
+        && (!(profile.role in ['taluka','ward','village']) || d.taluka == profile.taluka)
+        // Date-only values use UTC midnight. Allow the local day across time zones.
+        && d.dob is timestamp && d.dob >= timestamp.date(1900,1,1) && d.dob < request.time + duration.value(1, 'd')
+        && d.createdAt is timestamp && d.createdAt == request.time;
+    }
+    match /presidents/{uid} {
+      allow read: if isOwner(uid);
+      allow create: if isOwner(uid) && isValidPresident(request.resource.data, uid);
+      allow update, delete: if false;
+      match /members/{mobile} {
+        allow read: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid));
+        allow create: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid)) && isValidMember(request.resource.data, uid, mobile);
+        allow update, delete: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

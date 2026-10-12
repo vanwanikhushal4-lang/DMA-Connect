@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "DMA Connect",
+    "slug": "dma-connect",
+    "scheme": "dma-connect",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/app-icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "org.dmafoundation.connect"
+    },
+    "android": {
+      "package": "org.dmafoundation.connect",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/adaptive-icon.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "name": "DMA Connect",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./assets/foundation-logo.png",
+          "imageWidth": 110
+        }
+      ]
+    ]
+  }
+}
