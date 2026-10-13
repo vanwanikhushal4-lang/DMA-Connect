@@ -8,7 +8,9 @@ const selectedColor = DynamicColorIOS({ light: colors.purple, dark: '#D9C5F5' })
 const inactiveColor = DynamicColorIOS({ light: colors.muted, dark: '#D8D0E2' });
 
 export function WorkspaceTabs() {
-  const staff = isStaff(useSession().account);
+  const { account } = useSession();
+  const staff = isStaff(account);
+  const home = account?.role === 'maker' ? 'Submit member' : account?.role === 'checker' ? 'Review work' : staff ? 'Overview' : 'My profile';
   return (
     <NativeTabs
       tintColor={selectedColor}
@@ -21,9 +23,9 @@ export function WorkspaceTabs() {
       sidebarAdaptable={false}
       disableTransparentOnScrollEdge
     >
-      <NativeTabs.Trigger name="index" accessibilityLabel={staff ? 'Add member tab' : 'My profile tab'} contentStyle={{ backgroundColor: colors.background }}>
-        <NativeTabs.Trigger.Icon sf={staff ? { default: 'person.badge.plus', selected: 'person.badge.plus.fill' } : { default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} />
-        <NativeTabs.Trigger.Label>{staff ? 'Add member' : 'My profile'}</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name="index" accessibilityLabel={home + ' tab'} contentStyle={{ backgroundColor: colors.background }}>
+        <NativeTabs.Trigger.Icon sf={account?.role === 'maker' ? { default: 'person.badge.plus', selected: 'person.badge.plus.fill' } : account?.role === 'checker' ? { default: 'checkmark.shield', selected: 'checkmark.shield.fill' } : staff ? { default: 'rectangle.grid.1x2', selected: 'rectangle.grid.1x2.fill' } : { default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} />
+        <NativeTabs.Trigger.Label>{home}</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="statistics" accessibilityLabel="Statistics tab" contentStyle={{ backgroundColor: colors.background }}>
         <NativeTabs.Trigger.Icon sf={staff ? { default: 'chart.bar', selected: 'chart.bar.fill' } : { default: 'rectangle.3.group', selected: 'rectangle.3.group.fill' }} />

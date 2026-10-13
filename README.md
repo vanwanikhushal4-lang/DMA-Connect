@@ -1,3 +1,5 @@
+> The current role flow is State → District → Taluka with separate maker/checker teams and view-only presidents. See [Maker and checker workflow](docs/MAKER-CHECKER-FLOW.md).
+
 # DMA Connect
 
 Expo SDK 57 / React Native app for Dr. Mangesh Amale Foundation. The original foundation logo, white surfaces and purple accents are used throughout. Expo Router routes live in `src/app/`.
@@ -29,17 +31,17 @@ For signed device builds use the `development`, `preview` or `production` EAS pr
 ## Implemented flow
 
 - Own-phone OTP sign-in and signup in emulator mode; manual code entry, resend cooldown, iOS SMS autofill and native verification handling. Existing email/password users can sign in and verify/link their own phone in the emulator while preserving their UID. Live OTP awaits the later Twilio integration.
-- A central **Super Admin** oversees the district. Area presidents report to Super Admin; ward presidents report to their area president; village/local presidents report to their ward president. Cell presidents report directly to Super Admin.
-- Super Admin can invite any president or member, find a self-signed account by verified phone, appoint/transfer/demote a president, suspend/restore accounts, create committee units, and deactivate/reactivate units. Presidents can invite only their immediate permitted lower level within their own branch. Invitations expire after 14 days and activate only after the recipient verifies the invited phone and completes the profile.
+- Central **Super Admin** configures the organisation. Presidents follow State → District → Taluka → ward → village/local. Cells report through District. Only State, District and Taluka have one maker and one separate checker each.
+- Super Admin creates committee units and configures operational seats. Makers submit president/member invitations and account changes; the same team’s checker must approve. Presidents can view the work. Approved invitations expire after 14 days and activate after the recipient verifies their invited phone and completes their profile.
 - Member signup collects name, email, verified mobile, residence, DOB, home area, one required photograph and up to two additional photographs. Facebook, LinkedIn and Instagram fields are included and optional. Birthday email preference is editable.
-- Members can request both geographic and cell affiliations. Each committee president approves its own request independently; Super Admin can review any request. Requesting membership never grants a president role or data access.
-- Presidents can add provisional member records within their committee scope. Later signup with the same verified mobile claims the existing record. The district has one canonical person per phone, so dual affiliation counts one person in member totals.
+- Members request geographic and cell affiliations independently. Taluka checkers handle area/ward/local requests; District checkers handle cell requests. A checker cannot approve their own request. Requesting membership does not grant an operational role.
+- Makers submit full member profiles with photographs for checker approval. Pending records remain outside member counts. Later signup with the same verified mobile claims the approved existing record. A canonical identity is counted once across affiliations.
 - Staff tabs: **Add member**, **Statistics**, **Members**. Member tabs: **My profile**, **Committees**, **Account**. iOS uses native tabs with Liquid Glass on supported iOS versions; Android and web use the white/purple tab bar.
 - Members directory uses server pagination (50 rows), full-scope name/mobile prefix search, committee filtering and private profile/photo details. Statistics use server aggregates, India date boundaries and unique-person totals.
-- Committee presidents can suspend/restore their own committee affiliations. Suspension removes that committee's access while preserving independent memberships. A suspended affiliation cannot be bypassed by reapplying.
+- Assigned checkers suspend/restore affiliations handled by their team. Presidents can view these links. Suspension preserves independent affiliations and cannot be bypassed by reapplying.
 - Real-time owner snapshots and private workspace invalidation refresh approvals, profiles, counts and directories.
 
-Initial catalogue: **Belapur, Nerul, Vashi, Turbhe, Kopar Khairane, Ghansoli, Airoli, Digha**, plus **OBC Cell, Maratha Cell, Muslim Cell**. These are NMMC administrative areas, labelled **Area** in the app; they are not represented as official revenue talukas. Ward/local names are configured by Super Admin. Defaults: one active president per committee and one president appointment per account.
+Initial catalogue: **Belapur, Nerul, Vashi, Turbhe, Kopar Khairane, Ghansoli, Airoli, Digha**, plus **OBC Cell, Maratha Cell, Muslim Cell**. Existing NMMC area labels remain stable; the organisational Taluka level is not an official list of revenue talukas. Super Admin configures ward/local names. Each committee has one president; only State, District and Taluka have maker/checker seats.
 
 ## Backend
 
@@ -50,12 +52,13 @@ The backend is **Cloud Functions for Firebase v2, Node.js 24**, in Mumbai. `dmaA
 ```text
 accounts/{authUid}                 trusted account role and appointment
 people/{personId}                  canonical private profile and membership scopes
-committees/{committeeId}           district / area / ward / local / cell hierarchy
+committees/{committeeId}           state / district / taluka / ward / local / cell hierarchy and team seats
 requests/{personId__committeeId}   independent approval decisions
 affiliations/{personId__committeeId}
 phoneIndex/{sha256Phone}           private identity deduplication
 invitations/{sha256Phone}          private, expiring appointments
 workspaceEvents/{authUid}          private real-time invalidation
+workItems/{id}                    immutable maker submission and checker decision
 activity/{id}                     administrative audit records
 birthdayDeliveries/{person_year}  annual send ledger and retry state
 system/birthday-service           job status for Super Admin
@@ -82,6 +85,16 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true npm run ios -- --port 8093
 ```
 
 To log in locally, enter a 10-digit Indian mobile and tap **Send verification code**. The next screen shows **Test OTP**: enter that six-digit code and tap **Verify and continue**. Use `9000000001` for the seeded demo Super Admin, or a different test number to create a member account. Complete the profile on first signup.
+
+Local role samples (simulated OTP, no passwords):
+
+| Team | Maker | Checker | President |
+| --- | --- | --- | --- |
+| State | 9000000041 | 9000000042 | 9000000047 |
+| District | 9000000043 | 9000000044 | 9000000048 |
+| Vashi Taluka | 9000000045 | 9000000046 | 9000000020 |
+
+Super Admin: `9000000001`. A demo member submission is pending for the Vashi checker to review. An approved ward president invitation is available for `9000000049`; complete signup to activate it.
 
 The Auth emulator generates a new code for each request; it does not deliver SMS. The app displays only the code matching the requested phone and verification session, in development emulator mode. Codes are also printed in the emulator log. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` to the development computer's LAN IP for a physical phone, or `10.0.2.2` for the standard Android emulator. Restarting Metro without the flag selects live data services, but live phone signup stays unavailable until Twilio is integrated. Existing email sign-in remains available.
 

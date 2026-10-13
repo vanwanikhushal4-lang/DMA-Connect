@@ -1,6 +1,8 @@
+> The current role flow is State → District → Taluka with separate maker/checker teams and view-only presidents. See [Maker and checker workflow](MAKER-CHECKER-FLOW.md).
+
 # DMA Connect — live activation
 
-The implementation is locally testable and the new Firestore indexes have been deployed. Development continues with emulators without waiting for billing. Live SMS is deferred to a later Twilio Verify integration; do not activate Firebase Phone Authentication. New production rules, Functions, photo storage and birthday sender are still pending activation. Existing production member records are preserved.
+The implementation is locally testable and the earlier Firestore indexes have been deployed; the new maker/checker indexes are declared locally and still require deployment. Development continues with emulators without waiting for billing. Live SMS is deferred to a later Twilio Verify integration; do not activate Firebase Phone Authentication. New production rules, Functions, photo storage and birthday sender are still pending activation. Existing production member records are preserved.
 
 ## Values required from the owner
 
@@ -49,12 +51,22 @@ Run lint, typecheck, unit tests, rule tests and the four-emulator integration su
 npx --yes firebase-tools@latest deploy --only firestore,storage,functions --project dma-connect-foundation
 ```
 
-- Wait until every declared index is **READY**. Indexes have been deployed, but the local emulator does not prove production index coverage.
-- Confirm `dmaApi`, birthday schedule and five Firestore triggers all use **`asia-south1`**; Firestore triggers must point at the named `dma-connect` database.
-- Test real phone signup, invitation activation, role boundaries, area+cell approval, private photo upload/retrieval, directory pagination and statistics with agreed test accounts.
+- Wait until every declared index is **READY**. The new workItems and scope-query indexes must be deployed; the local emulator does not prove production index coverage.
+- Confirm `dmaApi`, birthday schedule and six Firestore triggers all use **`asia-south1`**; Firestore triggers must point at the named `dma-connect` database.
+- Test real phone signup, maker submission, separate checker approval, invitation activation and president view-only boundaries, area+cell approval, private photo upload/retrieval, directory pagination and statistics with agreed test accounts.
 - Verify a real recipient email through the app. Run the scheduled job against a consented test member whose birthday is today; check one branded email arrives with their supplied photograph, and a second run does not create another send. Emulator captures prove content/logic only, not real deliverability.
 - Check Super Admin History for `configurationMissing`, failed deliveries and `review` states. `sent` means the provider accepted the request. For `review`, investigate the original send in Resend before manually requeueing; automatic retries stop when the response is ambiguous beyond the provider's 24-hour idempotency window. Known failures retry up to seven days; older unsent records remain in the ledger for operator investigation.
 - Account suspension does not erase a person or other committee memberships. Committee deactivation disables appointments/new requests; historical affiliation records are retained. Review data retention with the foundation before publishing.
+
+## Upgrade an existing hierarchy
+
+Back up the named database and Auth/Storage before upgrading. Review the dry run:
+
+```sh
+node functions/scripts/upgrade-hierarchy.js --project dma-connect-foundation
+```
+
+Apply with `--apply` only during the coordinated rollout. This preserves canonical profiles and identities, adds `dma-state` ancestry, converts legacy area levels to Taluka, separates Super Admin from the district president seat and cancels unchecked legacy pending invitations. Do not use bootstrap to upgrade an existing hierarchy. Configure one maker and one separate checker per State, District and Taluka before submitting operational work.
 
 ## Native verification
 

@@ -70,7 +70,7 @@ export function AccountScreen() {
         </>}
         {!!error && <Text accessibilityRole="alert" style={ui.error}>{error}</Text>}
       </View>
-      <Text style={ui.body}>Presidents use the mobile number assigned in their invitation. All other new accounts start as members.</Text>
+      <Text style={ui.body}>Presidents, makers and checkers use the mobile number assigned in their approved invitation. All other new accounts start as members.</Text>
       {session.user && <ActionButton title="Sign out" secondary onPress={() => void session.signOut()} />}
     </Screen>
   </SafeAreaView>;
@@ -84,7 +84,7 @@ function CompleteAccount() {
     <View style={{ padding: 22, alignSelf: 'center', width: '100%', maxWidth: 780 }}><Brand /></View>
     {usingEmulators && <View style={{ paddingHorizontal: 22 }}><Text style={ui.body}>Test mode · SMS codes are simulated</Text></View>}
     <Screen title="Complete your profile" description="Add your details and photograph, then choose the committees you want to join.">
-      {setup?.invitation && <View style={ui.card}><Text style={ui.heading}>Your account invitation</Text><Text style={ui.body}>{setup.invitation.role === 'president' ? setup.invitation.committeeName + ' president' : 'Member account'} · the appointment activates after you complete your profile.</Text></View>}
+      {setup?.invitation && <View style={ui.card}><Text style={ui.heading}>Your account invitation</Text><Text style={ui.body}>{setup.invitation.role !== 'member' ? setup.invitation.committeeName + ' ' + setup.invitation.role : 'Member account'} · the appointment activates after you complete your profile.</Text></View>}
       {!!error && <View style={ui.card}><Text style={ui.error}>{error}</Text><ActionButton title="Retry" secondary onPress={() => setRetry(k => k + 1)} /></View>}
       {!setup && !error && <ActivityIndicator color={colors.purple} />}
       {setup && <PersonForm initial={setup.person || { ...emptyPerson, name: setup.invitation?.name || user?.displayName || '', email: setup.invitation?.email || user?.email || '', mobile: setup.phoneNumber.slice(3) }} lockMobile onSubmit={completeProfile} submitTitle="Complete account" />}

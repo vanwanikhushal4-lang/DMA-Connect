@@ -9,7 +9,7 @@ import { phoneKey, seedCommittees } from '../functions/src/domain.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-const projectId = 'demo-dma-connect';
+const projectId = 'demo-dma-community';
 if (process.env.GCLOUD_PROJECT !== projectId || !process.env.FIRESTORE_EMULATOR_HOST || !process.env.FIREBASE_AUTH_EMULATOR_HOST || !process.env.FIREBASE_STORAGE_EMULATOR_HOST) throw new Error('Run with the isolated demo Auth, Firestore, Functions and Storage emulators.');
 const require = createRequire(new URL('../functions/package.json', import.meta.url));
 const { initializeApp } = require('firebase-admin/app');
@@ -26,13 +26,13 @@ async function http(url, body, token) {
   return data;
 }
 async function call(user, operation, payload = {}) {
-  const r = await http(`http://127.0.0.1:5001/${projectId}/asia-south1/dmaApi`, { data: { operation, payload } }, user?.idToken);
+  const r = await http(`http://127.0.0.1:15001/${projectId}/asia-south1/dmaApi`, { data: { operation, payload } }, user?.idToken);
   return r.result || r.data;
 }
 async function phoneSignIn(phoneNumber) {
-  const endpoint = 'http://127.0.0.1:9099/identitytoolkit.googleapis.com/v1/';
+  const endpoint = 'http://127.0.0.1:19099/identitytoolkit.googleapis.com/v1/';
   const { sessionInfo } = await http(endpoint + 'accounts:sendVerificationCode?key=fake-api-key', { phoneNumber, recaptchaToken: 'emulator' });
-  const codes = await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${projectId}/verificationCodes`)).json();
+  const codes = await (await fetch(`http://127.0.0.1:19099/emulator/v1/projects/${projectId}/verificationCodes`)).json();
   const code = codes.verificationCodes.find(c => c.sessionInfo === sessionInfo)?.code;
   assert.ok(code, 'The emulator should issue a verification code to the requested phone.');
   await assert.rejects(http(endpoint + 'accounts:signInWithPhoneNumber?key=fake-api-key', { sessionInfo, code: code === '000000' ? '111111' : '000000' }));
@@ -46,19 +46,33 @@ async function createProfile(user, name, dob = '1990-01-01') {
   return (await db.collection('people').doc(user.uid).get()).data();
 }
 
-await fetch(`http://127.0.0.1:8180/emulator/v1/projects/${projectId}/databases/dma-connect/documents`, { method: 'DELETE' });
-await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${projectId}/accounts`, { method: 'DELETE' });
+await fetch(`http://127.0.0.1:18180/emulator/v1/projects/${projectId}/databases/dma-connect/documents`, { method: 'DELETE' });
+await fetch(`http://127.0.0.1:19099/emulator/v1/projects/${projectId}/accounts`, { method: 'DELETE' });
 const admin = await phoneSignIn('+919000000001');
 const batch = db.batch();
 for (const c of seedCommittees('Demo Navi Mumbai')) batch.set(db.collection('committees').doc(c.id), { ...c, createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(), ...(c.level === 'district' ? { presidentUid: admin.uid } : {}) });
 batch.set(db.collection('accounts').doc(admin.uid), { uid: admin.uid, personId: admin.uid, role: 'superadmin', level: 'district', committeeId: 'dma-district', parentCommitteeId: '', status: 'active', districtId: 'dma-district', phoneNumber: admin.phoneNumber, createdBy: 'fixtures', createdAt: FieldValue.serverTimestamp() });
 await batch.commit();
 await createProfile(admin, 'Demo Admin');
+async function configuredTeam(committeeId, role, mobile) {
+  await call(admin, 'configureTeam', { name: committeeId + ' ' + role, email: mobile + '@example.invalid', mobile, committeeId, role });
+  const user = await phoneSignIn('+91' + mobile);
+  await createProfile(user, committeeId + ' ' + role); return user;
+}
+const districtMaker = await configuredTeam('dma-district', 'maker', '9000003001');
+const districtChecker = await configuredTeam('dma-district', 'checker', '9000003002');
+const talukaMaker = await configuredTeam('area-vashi', 'maker', '9000003003');
+const talukaChecker = await configuredTeam('area-vashi', 'checker', '9000003004');
+async function approved(maker, checker, operation, payload) {
+  const work = await call(maker, operation, payload);
+  await call(checker, 'reviewWork', { workId: work.workId, decision: 'approved' });
+  return (await db.collection('workItems').doc(work.workId).get()).data().result || { ok: true };
+}
 const vashi = await phoneSignIn('+919000000002');
-await call(admin, 'createInvitation', { name: 'Vashi President', email: 'vashi@example.com', mobile: vashi.phoneNumber, committeeId: 'area-vashi' });
+await approved(districtMaker, districtChecker, 'createInvitation', { name: 'Vashi President', email: 'vashi@example.com', mobile: vashi.phoneNumber, committeeId: 'area-vashi' });
 await createProfile(vashi, 'Vashi President');
 const cell = await phoneSignIn('+919000000003');
-await call(admin, 'createInvitation', { name: 'Cell President', email: 'cell@example.com', mobile: cell.phoneNumber, committeeId: 'cell-obc' });
+await approved(districtMaker, districtChecker, 'createInvitation', { name: 'Cell President', email: 'cell@example.com', mobile: cell.phoneNumber, committeeId: 'cell-obc' });
 await createProfile(cell, 'Cell President');
 const member = await phoneSignIn('+919000000004');
 const person = await createProfile(member, 'Demo Member', '1990-10-12');
@@ -68,15 +82,15 @@ await check('public signup cannot supply a privileged role or scope', async () =
   assert.equal(a.role, 'member'); assert.equal(a.committeeId, ''); assert.deepEqual(person.activeScopeIds, []);
   await assert.rejects(call(member, 'createInvitation', { name: 'Fake Admin', email: 'fake@example.com', mobile: '+919000000009', committeeId: 'area-nerul' }));
 });
-await check('Super Admin can appoint any area or cell president', async () => {
-  assert.equal((await db.collection('accounts').doc(vashi.uid).get()).data().level, 'area');
+await check('district maker and checker can jointly appoint taluka or cell presidents', async () => {
+  assert.equal((await db.collection('accounts').doc(vashi.uid).get()).data().level, 'taluka');
   assert.equal((await db.collection('accounts').doc(cell.uid).get()).data().level, 'cell');
 });
 await call(admin, 'createCommittee', { name: 'Demo Ward', level: 'ward', parentId: 'area-vashi' });
 const wardId = 'ward-area-vashi-demo-ward';
 const ward = await phoneSignIn('+919000000005');
-await check('an area president can create only an authorised lower president', async () => {
-  await call(vashi, 'createInvitation', { name: 'Ward President', email: 'ward@example.com', mobile: ward.phoneNumber, committeeId: wardId });
+await check('the taluka maker submits lower president accounts and presidents cannot bypass the queue', async () => {
+  await approved(talukaMaker, talukaChecker, 'createInvitation', { name: 'Ward President', email: 'ward@example.com', mobile: ward.phoneNumber, committeeId: wardId });
   await assert.rejects(call(vashi, 'createInvitation', { name: 'Bad Peer', email: 'peer@example.com', mobile: '+919000000010', committeeId: 'area-nerul' }));
   await assert.rejects(call(cell, 'createInvitation', { name: 'Bad Ward', email: 'ward2@example.com', mobile: '+919000000011', committeeId: wardId }));
 });
@@ -84,8 +98,8 @@ await createProfile(ward, 'Ward President');
 await call(admin, 'createCommittee', { name: 'Demo Locality', level: 'local', parentId: wardId });
 const localId = 'local-' + wardId + '-demo-locality';
 const local = await phoneSignIn('+919000000006');
-await check('ward-to-local appointment preserves its parent hierarchy', async () => {
-  await call(ward, 'createInvitation', { name: 'Local President', email: 'local@example.com', mobile: local.phoneNumber, committeeId: localId });
+await check('taluka maker/checker appointment of a local president preserves its ward parent', async () => {
+  await approved(talukaMaker, talukaChecker, 'createInvitation', { name: 'Local President', email: 'local@example.com', mobile: local.phoneNumber, committeeId: localId });
   await createProfile(local, 'Local President');
   const a = (await db.collection('accounts').doc(local.uid).get()).data();
   assert.equal(a.parentCommitteeId, wardId); assert.equal(a.level, 'local');
@@ -99,31 +113,31 @@ await check('a cell president cannot review an area request or grant access to a
   await assert.rejects(call(cell, 'getPhoto', { personId: member.uid, path: person.photoPaths[0] }));
 });
 await check('area approval is independent from the pending cell request', async () => {
-  await call(vashi, 'decideRequest', { requestId: areaRequest, decision: 'approved' });
+  await call(talukaChecker, 'decideRequest', { requestId: areaRequest, decision: 'approved' });
   assert.equal((await db.collection('requests').doc(cellRequest).get()).data().status, 'pending');
   const d = await call(vashi, 'memberDirectory'); assert.equal(d.total, 1); assert.equal(d.members[0].personId, member.uid);
-  await assert.rejects(call(vashi, 'decideRequest', { requestId: areaRequest, decision: 'approved' }));
+  await assert.rejects(call(talukaChecker, 'decideRequest', { requestId: areaRequest, decision: 'approved' }));
 });
 await check('dual affiliation counts the same person once in district totals', async () => {
-  await call(cell, 'decideRequest', { requestId: cellRequest, decision: 'approved' });
+  await call(districtChecker, 'decideRequest', { requestId: cellRequest, decision: 'approved' });
   const d = await call(admin, 'memberDirectory'); assert.equal(d.total, 1); assert.equal(d.affiliationTotal, 2);
   const stats = await call(admin, 'statistics', { period: 'week' }); assert.equal(stats.total, 1);
 });
-await check('Super Admin can find and appoint a self-signed account without granting presidents a global phone lookup', async () => {
+await check('central account lookup and maker/checker appointment preserve scope boundaries', async () => {
   const found = await call(admin, 'lookupAccount', { mobile: member.phoneNumber }); assert.equal(found.person.personId, member.uid);
-  await assert.rejects(call(vashi, 'lookupAccount', { mobile: member.phoneNumber }));
-  await call(admin, 'changeAppointment', { uid: member.uid, committeeId: 'area-airoli' });
-  assert.equal((await db.collection('accounts').doc(member.uid).get()).data().level, 'area');
-  await call(admin, 'changeAppointment', { uid: member.uid, role: 'member' });
+  await assert.rejects(call(vashi, 'lookupAccount', { mobile: admin.phoneNumber }));
+  await approved(districtMaker, districtChecker, 'changeAppointment', { uid: member.uid, committeeId: 'area-airoli' });
+  assert.equal((await db.collection('accounts').doc(member.uid).get()).data().level, 'taluka');
+  await approved(districtMaker, districtChecker, 'changeAppointment', { uid: member.uid, role: 'member' });
 });
 await check('committee suspension removes only its own access and cannot be bypassed by resubmitting', async () => {
   await assert.rejects(call(cell, 'changeAffiliation', { affiliationId: areaRequest, status: 'suspended' }));
-  await call(vashi, 'changeAffiliation', { affiliationId: areaRequest, status: 'suspended' });
+  await call(talukaChecker, 'changeAffiliation', { affiliationId: areaRequest, status: 'suspended' });
   const p = (await db.collection('people').doc(member.uid).get()).data(); assert.deepEqual(p.activeCommitteeIds, ['cell-obc']); assert.equal(p.activeMember, true);
   await assert.rejects(call(vashi, 'memberDetail', { personId: member.uid }));
   await assert.rejects(call(member, 'requestAffiliation', { committeeId: 'area-vashi' }));
   const page = await call(vashi, 'affiliationDirectory', { status: 'suspended' }); assert.equal(page.affiliations[0].personName, 'Demo Member');
-  await call(vashi, 'changeAffiliation', { affiliationId: areaRequest, status: 'active' });
+  await call(talukaChecker, 'changeAffiliation', { affiliationId: areaRequest, status: 'active' });
   assert.equal((await call(vashi, 'memberDirectory')).total, 1);
 });
 await check('approved presidents can read the supplied private photo, while ordinary members cannot read other profiles', async () => {
@@ -137,21 +151,21 @@ await check('leaving one committee preserves the other affiliation and its scope
   await assert.rejects(call(vashi, 'memberDetail', { personId: member.uid }));
 });
 await check('account suspension prevents staff mutations and reactivation restores the appointment', async () => {
-  await call(admin, 'changeAppointment', { uid: vashi.uid, status: 'suspended' });
+  await approved(districtMaker, districtChecker, 'changeAppointment', { uid: vashi.uid, status: 'suspended' });
   await assert.rejects(call(vashi, 'memberDirectory'));
   await assert.rejects(call(vashi, 'uploadPhoto', { base64: logo }));
   const previousUser = await adminAuth.getUser(vashi.uid), previousProfile = (await db.collection('people').doc(vashi.uid).get()).data();
   await assert.rejects(call(vashi, 'completeProfile', { ...previousProfile, email: 'suspended-change@example.com' }));
   assert.equal((await adminAuth.getUser(vashi.uid)).email, previousUser.email);
-  await call(admin, 'changeAppointment', { uid: vashi.uid, status: 'active' });
+  await approved(districtMaker, districtChecker, 'changeAppointment', { uid: vashi.uid, status: 'active' });
   assert.equal((await call(vashi, 'staffState')).requests.length, 0);
 });
 await check('canonical mobile identities reject duplicate member registration across presidents', async () => {
   await assert.rejects(call(vashi, 'addMember', { ...person, committeeId: 'area-vashi', mobile: member.phoneNumber }));
 });
 await check('member directory paginates beyond 50 records and searches the full authorised scope', async () => {
-  const photo = await call(admin, 'uploadPhoto', { base64: logo });
-  for (let i = 0; i < 55; i++) await call(admin, 'addMember', { name: 'Load Member ' + String(i).padStart(2, '0'), email: `load${i}@example.com`, mobile: '9000001' + String(i).padStart(3, '0'), residence: 'Nerul', dob: '1991-01-01', areaId: 'area-nerul', socials: { facebook: '', linkedin: '', instagram: '' }, photoPaths: [photo.path], birthdayEmailsEnabled: false, committeeId: 'area-nerul' });
+  const photo = await call(districtMaker, 'uploadPhoto', { base64: logo });
+  for (let i = 0; i < 55; i++) await approved(districtMaker, districtChecker, 'addMember', { name: 'Load Member ' + String(i).padStart(2, '0'), email: `load${i}@example.com`, mobile: '9000001' + String(i).padStart(3, '0'), residence: 'Nerul', dob: '1991-01-01', areaId: 'area-nerul', socials: { facebook: '', linkedin: '', instagram: '' }, photoPaths: [photo.path], birthdayEmailsEnabled: false, committeeId: 'area-nerul' });
   const first = await call(admin, 'memberDirectory'); assert.equal(first.members.length, 50); assert.equal(first.total, 56); assert.ok(first.nextCursor);
   const second = await call(admin, 'memberDirectory', { cursor: first.nextCursor }); assert.equal(second.members.length, 6);
   assert.equal(new Set([...first.members, ...second.members].map(p => p.id)).size, 56);
@@ -160,9 +174,9 @@ await check('member directory paginates beyond 50 records and searches the full 
 });
 
 const app = clientApp({ projectId, apiKey: 'fake-api-key', storageBucket: `${projectId}.firebasestorage.app` }, 'e2e-client');
-const auth = clientAuth(app); connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
-const firestore = clientDb(app, 'dma-connect'); connectFirestoreEmulator(firestore, '127.0.0.1', 8180);
-const storage = clientStorage(app); connectStorageEmulator(storage, '127.0.0.1', 9199);
+const auth = clientAuth(app); connectAuthEmulator(auth, 'http://127.0.0.1:19099', { disableWarnings: true });
+const firestore = clientDb(app, 'dma-connect'); connectFirestoreEmulator(firestore, '127.0.0.1', 18180);
+const storage = clientStorage(app); connectStorageEmulator(storage, '127.0.0.1', 19199);
 const bridge = await call(null, 'exchangeNativeToken', { idToken: member.idToken });
 await signInWithCustomToken(auth, bridge.token);
 await check('owner-only profile reads work in the named database', async () => assert.equal((await getDoc(doc(firestore, 'people', member.uid))).data().personId, member.uid));
@@ -174,6 +188,8 @@ await check('security rules reject private profile lists, mixed-content reads an
   await assert.rejects(setDoc(doc(firestore, 'people', 'stolen'), { ...person, accountUid: member.uid, createdAt: new Date(), updatedAt: new Date() }));
   await assert.rejects(getDoc(doc(firestore, 'phoneIndex', phoneKey(member.phoneNumber))));
   await assert.rejects(getDoc(doc(firestore, 'invitations', phoneKey(vashi.phoneNumber))));
+  await assert.rejects(getDocs(collection(firestore, 'workItems')));
+  await assert.rejects(setDoc(doc(firestore, 'workItems', 'forged-approval'), { status: 'approved', createdBy: member.uid, reviewedBy: member.uid }));
   await assert.rejects(getDoc(doc(firestore, 'people', member.uid, 'access', 'dma-district')));
 });
 await check('rules allow the exact owner request and affiliation queries used by the app', async () => {
@@ -224,8 +240,8 @@ await check('birthday opt-out prevents a new annual delivery', async () => {
   assert.equal((await runBirthdayGreetings(new Date('2027-10-12T04:00:00Z'), emailClient)).sent, 0);
 });
 await check('signup claims a president-added record with its private photos and skips unverified birthday recipients', async () => {
-  const photo = await call(admin, 'uploadPhoto', { base64: logo });
-  const added = await call(admin, 'addMember', { name: 'Claimed Member', email: 'claimed@example.com', mobile: '9000002001', residence: 'Nerul', dob: '2000-10-12', areaId: 'area-nerul', socials: { facebook: '', linkedin: '', instagram: '' }, photoPaths: [photo.path], birthdayEmailsEnabled: true, committeeId: 'area-nerul' });
+  const photo = await call(districtMaker, 'uploadPhoto', { base64: logo });
+  const added = await approved(districtMaker, districtChecker, 'addMember', { name: 'Claimed Member', email: 'claimed@example.com', mobile: '9000002001', residence: 'Nerul', dob: '2000-10-12', areaId: 'area-nerul', socials: { facebook: '', linkedin: '', instagram: '' }, photoPaths: [photo.path], birthdayEmailsEnabled: true, committeeId: 'area-nerul' });
   const claimant = await phoneSignIn('+919000002001');
   const setup = await call(claimant, 'mySetup'); assert.equal(setup.person.personId, added.personId);
   await call(claimant, 'completeProfile', setup.person);

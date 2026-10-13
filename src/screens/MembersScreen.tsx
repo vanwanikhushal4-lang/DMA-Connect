@@ -10,17 +10,18 @@ import { ActionButton } from '../components/ActionButton';
 import { SelectField } from '../components/SelectField';
 import { ui } from '../components/Screen';
 import { colors, fonts } from '../theme';
+import { committeePath } from '../lib/community';
 import type { Person } from '../lib/community';
 
 export function MembersScreen() {
   const { members, total, loading, loadingMore, storageError, loadMembers, loadMore, nextCursor, search, setSearch, committeeFilter, setCommitteeFilter } = useMembers();
   const { committees } = useCommunity(), { account } = useSession();
   const [selected, setSelected] = useState<Person | null>(null);
-  const available = committees.filter(c => c.level !== 'district' && (account?.role === 'superadmin' || c.ancestorIds.includes(account?.committeeId || '')));
+  const available = committees.filter(c => !['state', 'district'].includes(c.level) && (account?.role === 'superadmin' || c.ancestorIds.includes(account?.committeeId || '')));
   return <View style={ui.screen}><FlatList
     data={members} keyExtractor={m => m.id} contentContainerStyle={ui.page} keyboardShouldPersistTaps="handled" initialNumToRender={12} windowSize={7}
     refreshing={loading} onRefresh={loadMembers} onEndReached={() => void loadMore()} onEndReachedThreshold={.4}
-    ListHeaderComponent={<View style={{ gap: 16, marginBottom: 15 }}><Text style={ui.title}>Members</Text><Text style={ui.body}>{total} unique members in your assigned scope.</Text><View style={[ui.row, { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, paddingHorizontal: 14, borderRadius: 12 }]}><Search size={18} color={colors.muted} /><TextInput accessibilityLabel="Search members" placeholder="Search name or mobile" value={search} onChangeText={setSearch} autoCapitalize="none" style={{ flex: 1, minHeight: 51, fontFamily: fonts.regular, color: colors.ink }} /></View><SelectField label="Committee filter" value={committeeFilter} options={[{ value: '', label: 'All assigned committees' }, ...available.map(c => ({ value: c.id, label: c.name }))]} onChange={setCommitteeFilter} />
+    ListHeaderComponent={<View style={{ gap: 16, marginBottom: 15 }}><Text style={ui.title}>Members</Text><Text style={ui.body}>{total} unique members in your assigned scope.</Text><View style={[ui.row, { borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, paddingHorizontal: 14, borderRadius: 12 }]}><Search size={18} color={colors.muted} /><TextInput accessibilityLabel="Search members" placeholder="Search name or mobile" value={search} onChangeText={setSearch} autoCapitalize="none" style={{ flex: 1, minHeight: 51, fontFamily: fonts.regular, color: colors.ink }} /></View><SelectField label="Committee filter" value={committeeFilter} options={[{ value: '', label: 'All assigned committees' }, ...available.map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))]} onChange={setCommitteeFilter} />
       {!!storageError && <View style={ui.card}><Text style={ui.error}>{storageError}</Text><ActionButton title="Retry loading members" secondary onPress={loadMembers} /></View>}
     </View>}
     ListEmptyComponent={loading ? <ActivityIndicator color={colors.purple} /> : <View style={ui.card}><Text style={ui.heading}>{search ? 'No matching members' : 'No approved members yet'}</Text><Text style={ui.body}>Add a member or approve a committee request to include them here.</Text></View>}

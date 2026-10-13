@@ -3,31 +3,37 @@ import assert from 'node:assert/strict';
 import { birthdayDeliveryId, birthdayDue, birthdayMessage, canAppoint, canReview, canViewScope, indiaDate, normalizePhone, seedCommittees, validateProfile } from '../src/domain.js';
 
 const admin = { uid: 'admin', role: 'superadmin', status: 'active' };
-const area = { uid: 'area-owner', role: 'president', level: 'area', committeeId: 'area-vashi', status: 'active' };
+const area = { uid: 'area-owner', role: 'president', level: 'taluka', committeeId: 'area-vashi', status: 'active' };
 const ward = { id: 'ward-one', active: true, level: 'ward', parentId: 'area-vashi', ancestorIds: ['dma-district', 'area-vashi', 'ward-one'], presidentUid: 'ward-owner' };
 const draft = { name: 'Test Member', email: 'member@example.com', residence: 'Vashi', dob: '1990-02-28', areaId: 'area-vashi', socials: { facebook: '', linkedin: '', instagram: '@member' }, photoPaths: ['drafts/member/photo.jpg'], birthdayEmailsEnabled: true };
 test('district catalogue has eight areas and the three initial cells', () => {
   const catalogue = seedCommittees();
-  assert.equal(catalogue.filter(c => c.level === 'area').length, 8);
+  assert.equal(catalogue.filter(c => c.level === 'taluka').length, 8);
   assert.equal(catalogue.filter(c => c.level === 'cell').length, 3);
   assert.ok(catalogue.some(c => c.name === 'Kopar Khairane'));
 });
-test('appointment authority follows the immediate parent and cannot promote a peer or superior', () => {
-  assert.equal(canAppoint(admin, ward), true);
-  assert.equal(canAppoint(area, ward), true);
-  assert.equal(canAppoint(area, { ...ward, parentId: 'area-nerul' }), false);
-  assert.equal(canAppoint(area, { ...ward, level: 'area' }), false);
-  assert.equal(canAppoint(area, { ...ward, level: 'local' }), false);
-  assert.equal(canAppoint({ ...area, role: 'member' }, ward), false);
-  assert.equal(canAppoint({ ...area, level: 'cell' }, ward), false);
-  assert.equal(canAppoint({ ...area, status: 'suspended' }, ward), false);
-  assert.equal(canAppoint(admin, { ...ward, level: 'district' }), false);
+test('only makers appoint presidents in the assigned team, including the three main levels', () => {
+  const stateMaker = { uid: 'state-maker', role: 'maker', level: 'state', committeeId: 'dma-state', status: 'active' };
+  const districtMaker = { ...stateMaker, uid: 'district-maker', level: 'district', committeeId: 'dma-district' };
+  const talukaMaker = { ...stateMaker, uid: 'taluka-maker', level: 'taluka', committeeId: 'area-vashi' };
+  for (const c of seedCommittees()) {
+    assert.equal(canAppoint(stateMaker, c), ['state', 'district'].includes(c.level));
+    assert.equal(canAppoint(districtMaker, c), ['taluka', 'cell'].includes(c.level));
+    assert.equal(canAppoint(admin, c), false);
+    assert.equal(canAppoint(area, c), false);
+  }
+  assert.equal(canAppoint(talukaMaker, { ...ward, appointmentTeamId: 'area-vashi' }), true);
+  assert.equal(canAppoint(talukaMaker, { ...ward, appointmentTeamId: 'area-nerul' }), false);
+  assert.equal(canAppoint({ ...talukaMaker, status: 'suspended' }, { ...ward, appointmentTeamId: 'area-vashi' }), false);
 });
-test('only the appointed committee president or Super Admin can review a request', () => {
-  assert.equal(canReview(admin, ward), true);
-  assert.equal(canReview(area, ward), false);
-  assert.equal(canReview({ uid: 'ward-owner', role: 'president', committeeId: ward.id, status: 'active' }, ward), true);
-  assert.equal(canReview({ uid: 'fake', role: 'president', committeeId: ward.id, status: 'active' }, ward), false);
+test('checkers review only their operational team; presidents retain scoped visibility', () => {
+  const target = { ...ward, teamId: 'area-vashi', teamCheckerUid: 'checker' };
+  const checker = { uid: 'checker', role: 'checker', level: 'taluka', committeeId: 'area-vashi', status: 'active' };
+  assert.equal(canReview(checker, target), true);
+  assert.equal(canReview({ ...checker, uid: 'forged' }, target), false);
+  assert.equal(canReview({ ...checker, committeeId: 'area-nerul' }, target), false);
+  assert.equal(canReview(area, target), false);
+  assert.equal(canReview(admin, target), false);
   assert.equal(canViewScope(area, ward), true);
   assert.equal(canViewScope({ ...area, committeeId: 'area-nerul' }, ward), false);
 });

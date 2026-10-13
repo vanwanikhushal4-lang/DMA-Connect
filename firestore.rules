@@ -5,7 +5,7 @@
 // requests/{id}: applicantUid/personId/committeeId/status, one committee decision.
 // affiliations/{id}: personId/committeeId/status, independent committee membership.
 // workspaceEvents/{uid}: server timestamp for real-time invalidation.
-// phoneIndex/invitations/activity/birthdayDeliveries/system/access: server only.
+// workItems/phoneIndex/invitations/activity/birthdayDeliveries/system/access: server only.
 // Every client mutation is denied. Callable backend validators and transactions
 // enforce field validity, immutable identity, scoped appointments and transitions.
 rules_version = '2';
@@ -24,7 +24,7 @@ service cloud.firestore {
     function isValidAccount(d) {
       return d.keys().hasAll(['uid','personId','role','status','committeeId'])
         && validString(d.uid,1,128) && validString(d.personId,1,128)
-        && d.role in ['superadmin','president','member']
+        && d.role in ['superadmin','president','maker','checker','member']
         && d.status in ['active','suspended'];
     }
     function isValidPerson(d) {

@@ -48,8 +48,9 @@
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:rules": "npx --yes firebase-tools@latest emulators:exec --only firestore --project demo-dma-connect \"node --test tests/firestore-rules.mjs\"",
-    "test:integration": "npx --yes firebase-tools@latest emulators:exec --config firebase.test.json --only auth,firestore,functions,storage --project demo-dma-connect \"node tests/community.e2e.mjs\"",
-    "postinstall": "node scripts/patch-expo-paths.cjs"
+    "test:integration": "npx --yes firebase-tools@latest emulators:exec --config firebase.workflow-test.json --only auth,firestore,functions,storage --project demo-dma-community \"node tests/community.e2e.mjs\"",
+    "postinstall": "node scripts/patch-expo-paths.cjs",
+    "test:workflow": "npx --yes firebase-tools@latest emulators:exec --config firebase.workflow-test.json --only auth,firestore,functions,storage --project demo-dma-workflow \"node tests/workflow.e2e.mjs\""
   },
   "private": true,
   "engines": {

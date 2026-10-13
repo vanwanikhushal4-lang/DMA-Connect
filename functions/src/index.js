@@ -10,7 +10,7 @@ import { Resend } from 'resend';
 import sharp from 'sharp';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { birthdayDeliveryId, birthdayDue, birthdayMessage, canAppoint, canReview, canViewScope, districtId, indiaDate, normalizePhone, phoneKey, slug, validateProfile } from './domain.js';
+import { birthdayDeliveryId, birthdayDue, birthdayMessage, canAppoint, canReview, canViewScope, districtId, stateId, teamLevels, seatField, pendingSeatField, indiaDate, normalizePhone, phoneKey, slug, validateProfile } from './domain.js';
 
 const projectId = process.env.GCLOUD_PROJECT || 'dma-connect-foundation';
 initializeApp({ storageBucket: process.env.STORAGE_BUCKET || `${projectId}.firebasestorage.app` });
@@ -44,10 +44,11 @@ async function actor(uid, tx) {
 }
 async function staff(uid, tx) {
   const a = await actor(uid, tx);
-  if (!['superadmin', 'president'].includes(a.role)) fail('permission-denied', 'This action is available to appointed presidents.');
-  if (a.role === 'president') {
+  if (!['superadmin', 'president', 'maker', 'checker'].includes(a.role)) fail('permission-denied', 'An appointed staff account is required.');
+  if (a.role !== 'superadmin') {
     const c = await (tx ? tx.get(ref('committees', a.committeeId)) : ref('committees', a.committeeId).get());
-    if (!c.exists || !c.data().active || c.data().presidentUid !== uid) fail('permission-denied', 'Your committee appointment is inactive.');
+    if (!c.exists || !c.data().active || c.data()[seatField(a.role)] !== uid) fail('permission-denied', 'Your committee appointment is inactive.');
+    a.staffName = c.data()[a.role + 'Name'] || a.phoneNumber;
   }
   return a;
 }
@@ -56,6 +57,163 @@ async function committee(id, tx) {
   const s = await (tx ? tx.get(ref('committees', id)) : ref('committees', id).get());
   if (!s.exists) fail('not-found', 'This committee no longer exists.');
   return { ...s.data(), id };
+}
+async function reviewCommittee(id, tx) {
+  const target = await committee(id, tx);
+  const team = await committee(target.teamId, tx);
+  return { ...target, teamCheckerUid: team.active ? team.checkerUid : '' };
+}
+async function maker(uid, tx) {
+  const a = await staff(uid, tx);
+  if (a.role !== 'maker' || !teamLevels.includes(a.level)) fail('permission-denied', 'Only the appointed maker can submit account or member work.');
+  return a;
+}
+async function approvedActor(tx, makerUid, approval, operation) {
+  if (!approval?.workId || !approval.uid || makerUid === approval.uid) fail('permission-denied', 'A separate checker approval is required.');
+  const item = await tx.get(ref('workItems', approval.workId));
+  if (!item.exists || item.data().status !== 'pending' || item.data().operation !== operation || item.data().createdBy !== makerUid) fail('failed-precondition', 'This work has already been handled or is unavailable.');
+  const a = await maker(makerUid, tx), checker = await staff(approval.uid, tx);
+  if (checker.role !== 'checker' || checker.committeeId !== a.committeeId || item.data().teamId !== a.committeeId) fail('permission-denied', 'Only this maker’s assigned checker can approve the work.');
+  if (JSON.stringify(item.data().payload) !== JSON.stringify(approval.payload)) fail('aborted', 'The submitted work changed. Reload before reviewing.');
+  return a;
+}
+function finishWork(tx, approval, result) {
+  tx.update(ref('workItems', approval.workId), { status: 'approved', reviewedBy: approval.uid, reviewedByName: approval.name, reason: approval.reason, reviewedAt: timestamp(), updatedAt: timestamp(), result });
+  audit(tx, approval.uid, 'approve-work', approval.workId);
+  bump(tx, approval.uid);
+}
+async function submitWork(uid, operation, data) {
+  await phoneUser(uid);
+  const a = await maker(uid), team = await committee(a.committeeId);
+  if (!team.checkerUid || team.checkerUid === uid) fail('failed-precondition', 'Assign a separate checker to this team before submitting work.');
+  await staff(team.checkerUid);
+  let payload, target;
+  if (operation === 'addMember') {
+    const phoneNumber = normalizePhone(data.mobile);
+    payload = { ...validateProfile(data, phoneNumber), committeeId: data.committeeId };
+    target = await committee(data.committeeId);
+    const home = await committee(payload.areaId);
+    if (!home.active || home.level !== 'taluka') fail('invalid-argument', 'Choose an active home area.');
+    if (!target.active || ['state', 'district'].includes(target.level) || !canViewScope(a, target)) fail('permission-denied', 'Choose a membership committee inside your scope.');
+    await assertPhotoPaths(payload.photoPaths, 'new-member', uid);
+    if ((await ref('phoneIndex', phoneKey(phoneNumber)).get()).exists) fail('already-exists', 'This mobile already has a profile. Ask the member to request affiliation.');
+  } else if (operation === 'createInvitation') {
+    const role = data.role || 'president';
+    if (!['president', 'member'].includes(role)) fail('permission-denied', 'Team maker/checker seats are configured by the Super Admin.');
+    if (typeof data.name !== 'string' || !data.name.trim() || data.name.length > 120 || typeof data.email !== 'string' || data.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email)) fail('invalid-argument', 'Enter a name and valid email.');
+    payload = { name: data.name.trim(), email: data.email.trim().toLowerCase(), mobile: normalizePhone(data.mobile), role, committeeId: role === 'president' ? data.committeeId : '' };
+    if (role === 'president') {
+      target = await committee(data.committeeId);
+      if (!canAppoint(a, target)) fail('permission-denied', 'This president appointment belongs to another team.');
+      if (target.presidentUid || target.pendingInvitationId) fail('already-exists', 'This president seat is already occupied or reserved.');
+    }
+  } else if (operation === 'changeAppointment') {
+    if (typeof data.uid !== 'string' || data.uid === uid || data.uid === team.checkerUid) fail('invalid-argument', 'Choose a member or president account.');
+    const account = await ref('accounts', data.uid).get();
+    if (!account.exists || !['member', 'president'].includes(account.data().role)) fail('permission-denied', 'Operational team roles cannot be changed through this workflow.');
+    const oldCommittee = account.data().committeeId ? await committee(account.data().committeeId) : null;
+    if (oldCommittee ? !canAppoint(a, oldCommittee) : !(await personVisible(uid, account.data().personId))) fail('permission-denied', 'This account is outside your team authority.');
+    target = data.committeeId ? await committee(data.committeeId) : oldCommittee;
+    if (data.committeeId && !canAppoint(a, target)) fail('permission-denied', 'This appointment belongs to another team.');
+    if (data.role && data.role !== 'member') fail('invalid-argument', 'Choose a president appointment or remove the appointment.');
+    if (data.status && !['active', 'suspended'].includes(data.status)) fail('invalid-argument', 'Choose active or suspended.');
+    if (!data.committeeId && !data.role && !data.status) fail('invalid-argument', 'Choose an account change.');
+    const person = (await ref('people', account.data().personId).get()).data();
+    if (!person) fail('failed-precondition', 'The account profile is unavailable.');
+    const { name, email, mobile, residence, dob, areaId, socials, photoPaths } = person;
+    payload = { uid: data.uid, name, subjectProfile: { name, email, mobile, residence, dob, areaId, socials, photoPaths }, ...(data.committeeId ? { committeeId: data.committeeId } : {}), ...(data.role ? { role: data.role } : {}), ...(data.status ? { status: data.status } : {}) };
+  } else fail('invalid-argument', 'Choose a supported work type.');
+  const id = randomUUID();
+  await db.runTransaction(async tx => {
+    const current = await maker(uid, tx), currentTeam = await committee(current.committeeId, tx);
+    const checker = currentTeam.checkerUid ? await staff(currentTeam.checkerUid, tx) : null;
+    if (current.committeeId !== a.committeeId || checker?.role !== 'checker' || checker.committeeId !== a.committeeId || checker.uid === uid) fail('failed-precondition', 'This team needs an active separate checker.');
+    const person = await tx.get(ref('people', a.personId));
+    tx.set(ref('workItems', id), { id, operation, payload, name: payload.name || 'Account change', teamId: a.committeeId, teamName: team.name, createdBy: uid, createdByName: person.data()?.name || 'Maker', scopeIds: [...new Set([...team.ancestorIds, ...(target?.ancestorIds || [])])], status: 'pending', reviewedBy: '', reason: '', createdAt: timestamp(), updatedAt: timestamp() });
+    audit(tx, uid, 'submit-work', id, { operation, teamId: a.committeeId });
+    bump(tx, uid); bump(tx, currentTeam.checkerUid); bump(tx, currentTeam.presidentUid);
+  });
+  return { workId: id, status: 'pending' };
+}
+async function workDetail(uid, data) {
+  const a = await staff(uid), item = await ref('workItems', data.workId).get();
+  if (!item.exists || (a.role !== 'superadmin' && !item.data().scopeIds.includes(a.committeeId))) fail('permission-denied', 'This work is outside your scope.');
+  return { item: serialize(item.data(), item.id) };
+}
+async function workPhoto(uid, data) {
+  const { item } = await workDetail(uid, data);
+  if (typeof data.path !== 'string' || !(item.payload.photoPaths || item.payload.subjectProfile?.photoPaths)?.includes(data.path)) fail('permission-denied', 'This photograph is not attached to the work.');
+  const [bytes] = await bucket.file(data.path).download();
+  const photo = await sharp(bytes).resize(300, 300, { fit: 'inside' }).jpeg({ quality: 78 }).toBuffer();
+  return { uri: 'data:image/jpeg;base64,' + photo.toString('base64') };
+}
+async function workDirectory(uid, data = {}) {
+  const a = await staff(uid);
+  const status = ['pending', 'approved', 'declined', 'withdrawn'].includes(data.status) ? data.status : 'pending';
+  let q = db.collection('workItems').where('status', '==', status);
+  if (a.role !== 'superadmin') q = q.where('scopeIds', 'array-contains', a.committeeId);
+  q = q.orderBy('createdAt', 'desc').orderBy(FieldPath.documentId()).limit(51);
+  if (data.cursor) {
+    const { item } = await workDetail(uid, { workId: data.cursor });
+    if (item.status !== status) fail('invalid-argument', 'Refresh this work list before continuing.');
+    q = q.startAfter(await ref('workItems', data.cursor).get());
+  }
+  const records = await q.get(), page = records.docs.slice(0, 50);
+  return { items: page.map(s => { const { payload, ...summary } = s.data(); return serialize({ ...summary, phoneNumber: payload.mobile || '', role: payload.role || '', committeeId: payload.committeeId || '' }, s.id); }), nextCursor: records.size > 50 ? page.at(-1).id : null };
+}
+async function withdrawWork(uid, data) {
+  await db.runTransaction(async tx => {
+    await maker(uid, tx);
+    const item = await tx.get(ref('workItems', data.workId));
+    if (!item.exists || item.data().createdBy !== uid || item.data().status !== 'pending') fail('permission-denied', 'Withdraw only your own pending work.');
+    tx.update(item.ref, { status: 'withdrawn', updatedAt: timestamp() });
+    audit(tx, uid, 'withdraw-work', item.id); bump(tx, uid);
+  });
+  return { ok: true };
+}
+async function reviewWork(uid, data) {
+  if (!['approved', 'declined'].includes(data.decision)) fail('invalid-argument', 'Choose approve or reject.');
+  const { item } = await workDetail(uid, data);
+  const reviewer = await staff(uid);
+  const approval = { uid, name: reviewer.staffName || reviewer.phoneNumber, workId: item.id, payload: item.payload, reason: typeof data.reason === 'string' ? data.reason.trim().slice(0, 500) : '' };
+  if (data.decision === 'declined') {
+    if (!approval.reason) fail('invalid-argument', 'Explain why this work is rejected.');
+    await db.runTransaction(async tx => {
+      await approvedActor(tx, item.createdBy, approval, item.operation);
+      tx.update(ref('workItems', item.id), { status: 'declined', reviewedBy: uid, reviewedByName: approval.name, reason: approval.reason, reviewedAt: timestamp(), updatedAt: timestamp() });
+      audit(tx, uid, 'decline-work', item.id); bump(tx, item.createdBy); bump(tx, uid);
+    });
+  } else {
+    const handler = { addMember, createInvitation, changeAppointment }[item.operation];
+    if (!handler) fail('invalid-argument', 'Unsupported work operation.');
+    await handler(item.createdBy, item.payload, approval);
+  }
+  return { ok: true };
+}
+async function configureTeam(uid, data) {
+  if ((await staff(uid)).role !== 'superadmin' || !['maker', 'checker'].includes(data.role)) fail('permission-denied', 'Only the Super Admin configures maker/checker seats.');
+  if (!data.uid) return createInvitation(uid, data);
+  await db.runTransaction(async tx => {
+    if ((await staff(uid, tx)).role !== 'superadmin') fail('permission-denied', 'Super Admin access is required.');
+    const target = await committee(data.committeeId, tx), account = await tx.get(ref('accounts', data.uid));
+    if (!target.active || !teamLevels.includes(target.level) || !account.exists || account.data().role === 'superadmin') fail('invalid-argument', 'Choose an active State, District or Taluka team and an existing account.');
+    const old = account.data(), oldCommittee = old.committeeId ? await committee(old.committeeId, tx) : null;
+    const person = await tx.get(ref('people', old.personId));
+    if (data.remove === true) {
+      if (old.role !== data.role || old.committeeId !== target.id || target[seatField(data.role)] !== data.uid) fail('invalid-argument', 'Choose the account currently holding this team seat.');
+      tx.update(account.ref, { role: 'member', level: 'member', committeeId: '', parentCommitteeId: '', updatedAt: timestamp() });
+      tx.update(ref('committees', target.id), { [seatField(data.role)]: '', [data.role + 'Name']: '', updatedAt: timestamp() });
+      audit(tx, uid, 'remove-team-seat', data.uid, { role: data.role, committeeId: target.id }); bump(tx, data.uid); bump(tx, uid);
+      return;
+    }
+    if ((target[seatField(data.role)] && target[seatField(data.role)] !== data.uid) || target[pendingSeatField(data.role)]) fail('already-exists', 'This seat is already occupied or reserved.');
+    if (target[data.role === 'maker' ? 'checkerUid' : 'makerUid'] === data.uid) fail('permission-denied', 'Maker and checker must be separate people.');
+    if (oldCommittee && seatField(old.role) && oldCommittee[seatField(old.role)] === data.uid) tx.update(ref('committees', oldCommittee.id), { [seatField(old.role)]: '', [old.role + 'Name']: '', updatedAt: timestamp() });
+    tx.update(account.ref, { role: data.role, level: target.level, committeeId: target.id, parentCommitteeId: target.parentId, status: 'active', updatedAt: timestamp() });
+    tx.update(ref('committees', target.id), { [seatField(data.role)]: data.uid, [data.role + 'Name']: person.data()?.name || '', updatedAt: timestamp() });
+    audit(tx, uid, 'configure-team', data.uid, { role: data.role, committeeId: target.id }); bump(tx, data.uid); bump(tx, uid);
+  });
+  return { ok: true };
 }
 async function assertPhotoPaths(paths, personId, creatorUid, retained = []) {
   for (const path of paths) {
@@ -67,13 +225,13 @@ async function assertPhotoPaths(paths, personId, creatorUid, retained = []) {
 async function personVisible(uid, personId) {
   const a = await actor(uid);
   if (a.personId === personId) return true;
-  if (!['superadmin', 'president'].includes(a.role)) return false;
+  if (!['superadmin', 'president', 'maker', 'checker'].includes(a.role)) return false;
   await staff(uid);
   if (a.role === 'superadmin') return true;
   const person = await ref('people', personId).get();
   if (person.data()?.accountUid) {
     const appointed = await ref('accounts', person.data().accountUid).get();
-    if (appointed.data()?.role === 'president' && appointed.data().committeeId && canViewScope(a, await committee(appointed.data().committeeId))) return true;
+    if (['president', 'maker', 'checker'].includes(appointed.data()?.role) && appointed.data().committeeId && canViewScope(a, await committee(appointed.data().committeeId))) return true;
   }
   const links = await ref('people', personId).collection('access').doc(a.committeeId).get();
   return links.exists && links.data().active === true;
@@ -97,7 +255,7 @@ async function completeProfile(uid, data) {
   const user = await phoneUser(uid);
   const clean = validateProfile(data, user.phoneNumber);
   const area = await committee(clean.areaId);
-  if (area.level !== 'area' || !area.active) fail('invalid-argument', 'Choose an active home area.');
+  if (area.level !== 'taluka' || !area.active) fail('invalid-argument', 'Choose an active home area.');
   const key = phoneKey(user.phoneNumber);
   const index = await ref('phoneIndex', key).get();
   const existingIdentity = await ref('accounts', uid).get();
@@ -116,10 +274,15 @@ async function completeProfile(uid, data) {
     let appointedCommittee;
     if (!existingAccount.exists && invite.exists && invite.data().status === 'pending' && invite.data().expiresAt.toMillis() > Date.now()) {
       const invitation = invite.data();
-      if (invitation.role === 'president') {
+      if (['president', 'maker', 'checker'].includes(invitation.role)) {
         appointedCommittee = await committee(invitation.committeeId, tx);
-        const inviter = await staff(invitation.createdBy, tx);
-        if (!canAppoint(inviter, appointedCommittee) || appointedCommittee.pendingInvitationId !== key || appointedCommittee.presidentUid) fail('failed-precondition', 'This appointment needs to be reviewed by the Super Admin.');
+        if (appointedCommittee[pendingSeatField(invitation.role)] !== key || appointedCommittee[seatField(invitation.role)]) fail('failed-precondition', 'This appointment is no longer available.');
+        if (invitation.setupBy) {
+          if ((await staff(invitation.setupBy, tx)).role !== 'superadmin') fail('failed-precondition', 'Team setup needs review by the Super Admin.');
+        } else {
+          const approval = await tx.get(ref('workItems', invitation.workId));
+          if (!approval.exists || approval.data().status !== 'approved' || approval.data().createdBy === approval.data().reviewedBy) fail('failed-precondition', 'This appointment has not received checker approval.');
+        }
       }
       account = { role: invitation.role, level: invitation.level, committeeId: invitation.committeeId, parentCommitteeId: appointedCommittee?.parentId || '', createdBy: invitation.createdBy };
     }
@@ -127,7 +290,7 @@ async function completeProfile(uid, data) {
     tx.set(accountRef, { ...account, uid, personId, status: 'active', phoneNumber: user.phoneNumber, districtId, createdAt: account.createdAt || timestamp(), updatedAt: timestamp() });
     tx.set(indexRef, { personId, phoneNumber: user.phoneNumber });
     if (appointedCommittee) {
-      tx.update(ref('committees', appointedCommittee.id), { presidentUid: uid, presidentName: clean.name, pendingInvitationId: '', updatedAt: timestamp() });
+      tx.update(ref('committees', appointedCommittee.id), { [seatField(account.role)]: uid, [account.role + 'Name']: clean.name, [pendingSeatField(account.role)]: '', updatedAt: timestamp() });
       audit(tx, uid, 'accept-president-invitation', appointedCommittee.id);
     }
     if (invite.exists && invite.data().status === 'pending' && account.createdBy === invite.data().createdBy) tx.update(inviteRef, { status: 'accepted', acceptedBy: uid, acceptedAt: timestamp() });
@@ -136,50 +299,55 @@ async function completeProfile(uid, data) {
   await getAuth().updateUser(uid, { displayName: clean.name });
   return { personId, emailNeedsVerification: !(user.email === clean.email && user.emailVerified) };
 }
-async function createInvitation(uid, data) {
+async function createInvitation(uid, data, approval) {
   await phoneUser(uid);
   const phoneNumber = normalizePhone(data.mobile), id = phoneKey(phoneNumber);
   if (typeof data.name !== 'string' || !data.name.trim() || data.name.length > 120 || typeof data.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.email) || data.email.length > 254) fail('invalid-argument', 'Enter a name and valid email for the account.');
-  const role = data.role === 'member' ? 'member' : 'president';
+  const role = data.role || 'president';
+  if (!['president', 'member', 'maker', 'checker'].includes(role)) fail('invalid-argument', 'Choose a valid account type.');
   await db.runTransaction(async tx => {
-    const a = await staff(uid, tx);
+    const a = approval ? await approvedActor(tx, uid, approval, 'createInvitation') : await staff(uid, tx);
+    if (!approval && (a.role !== 'superadmin' || !['maker', 'checker'].includes(role))) fail('permission-denied', 'Account creation requires maker submission and checker approval.');
     const [oldInvite, index] = await Promise.all([tx.get(ref('invitations', id)), tx.get(ref('phoneIndex', id))]);
     let target;
-    if (role === 'president') {
+    if (role !== 'member') {
       target = await committee(data.committeeId, tx);
-      if (!canAppoint(a, target)) fail('permission-denied', 'You can appoint only the permitted lower level in your own hierarchy.');
-      if (target.presidentUid) fail('already-exists', 'This committee already has a president. Use a Super Admin transfer.');
-      if (target.pendingInvitationId && target.pendingInvitationId !== id) fail('already-exists', 'This committee already has a pending invitation.');
-    } else if (a.role !== 'superadmin') fail('permission-denied', 'Use Add member for member records. Only the Super Admin can invite a member account.');
+      if (role === 'president' ? !canAppoint(a, target) : a.role !== 'superadmin' || !teamLevels.includes(target.level) || !target.active) fail('permission-denied', 'Choose an authorised appointment.');
+      if (target[seatField(role)]) fail('already-exists', 'This role already has an appointed account.');
+      if (target[pendingSeatField(role)] && target[pendingSeatField(role)] !== id) fail('already-exists', 'This role already has a pending invitation.');
+    } else if (a.role !== 'maker') fail('permission-denied', 'Only makers submit member account invitations.');
     if (index.exists) {
       const person = await tx.get(ref('people', index.data().personId));
       if (person.data()?.accountUid) fail('already-exists', 'This person already has an account. The Super Admin can change their appointment.');
     }
     if (oldInvite.exists && oldInvite.data().status === 'pending' && oldInvite.data().expiresAt.toMillis() > Date.now()) fail('already-exists', 'This number already has a pending invitation.');
-    tx.set(ref('invitations', id), { phoneNumber, name: data.name.trim(), email: data.email.trim().toLowerCase(), role, level: target?.level || 'member', committeeId: target?.id || '', committeeName: target?.name || '', createdBy: uid, status: 'pending', createdAt: timestamp(), expiresAt: Timestamp.fromMillis(Date.now() + 14 * 24 * 60 * 60 * 1000) });
-    if (target) tx.update(ref('committees', target.id), { pendingInvitationId: id, updatedAt: timestamp() });
+    const invitationScope = target ? target.ancestorIds : (await committee(a.committeeId, tx)).ancestorIds;
+    tx.set(ref('invitations', id), { scopeIds: invitationScope, phoneNumber, name: data.name.trim(), email: data.email.trim().toLowerCase(), role, level: target?.level || 'member', committeeId: target?.id || '', committeeName: target?.name || '', createdBy: uid, ...(approval ? { workId: approval.workId, approvedBy: approval.uid, teamId: a.committeeId } : { setupBy: uid }), status: 'pending', createdAt: timestamp(), expiresAt: Timestamp.fromMillis(Date.now() + 14 * 24 * 60 * 60 * 1000) });
+    if (target) tx.update(ref('committees', target.id), { [pendingSeatField(role)]: id, updatedAt: timestamp() });
     audit(tx, uid, 'create-invitation', id, { role, committeeId: target?.id || '' });
+    if (approval) finishWork(tx, approval, { invitationId: id });
     bump(tx, uid);
   });
   return { invitationId: id, phoneNumber };
 }
-async function addMember(uid, data) {
+async function addMember(uid, data, approval) {
   await phoneUser(uid);
   const phoneNumber = normalizePhone(data.mobile), key = phoneKey(phoneNumber), personId = 'record-' + randomUUID();
   const clean = validateProfile(data, phoneNumber);
   const area = await committee(clean.areaId);
-  if (area.level !== 'area' || !area.active) fail('invalid-argument', 'Choose an active home area.');
+  if (area.level !== 'taluka' || !area.active) fail('invalid-argument', 'Choose an active home area.');
   await assertPhotoPaths(clean.photoPaths, personId, uid);
   await db.runTransaction(async tx => {
-    const a = await staff(uid, tx), target = await committee(data.committeeId, tx);
+    const a = await approvedActor(tx, uid, approval, 'addMember'), target = await committee(data.committeeId, tx);
     const existing = await tx.get(ref('phoneIndex', key));
-    if (!target.active || target.level === 'district' || !canViewScope(a, target)) fail('permission-denied', 'Add members only to your assigned committee or an authorised descendant.');
+    if (!target.active || ['state', 'district'].includes(target.level) || !canViewScope(a, target)) fail('permission-denied', 'Add members only to your assigned committee or an authorised descendant.');
     if (existing.exists) fail('already-exists', 'This mobile number already has a member profile. Ask them to sign in and request this committee.');
-    tx.set(ref('people', personId), { ...clean, personId, taluka: area.name, accountUid: '', activeMember: true, activeScopeIds: target.ancestorIds, activeCommitteeIds: [target.id], source: 'president', createdBy: uid, createdAt: timestamp(), updatedAt: timestamp() });
+    tx.set(ref('people', personId), { ...clean, personId, taluka: area.name, accountUid: '', activeMember: true, activeScopeIds: target.ancestorIds, activeCommitteeIds: [target.id], source: 'maker', createdBy: uid, createdAt: timestamp(), updatedAt: timestamp() });
     tx.set(ref('phoneIndex', key), { personId, phoneNumber });
-    tx.set(ref('affiliations', personId + '__' + target.id), { personId, accountUid: '', committeeId: target.id, committeeName: target.name, branch: target.branch, ancestorIds: target.ancestorIds, status: 'active', createdAt: timestamp(), approvedBy: uid });
+    tx.set(ref('affiliations', personId + '__' + target.id), { personId, accountUid: '', committeeId: target.id, committeeName: target.name, branch: target.branch, ancestorIds: target.ancestorIds, status: 'active', createdAt: timestamp(), approvedBy: approval.uid });
     for (const scope of target.ancestorIds) tx.set(ref('people', personId).collection('access').doc(scope), { active: true });
     audit(tx, uid, 'add-member', personId, { committeeId: target.id });
+    finishWork(tx, approval, { personId });
     bump(tx, uid); bump(tx, target.presidentUid);
   });
   return { personId };
@@ -190,7 +358,7 @@ async function requestAffiliation(uid, data) {
     const id = a.personId + '__' + target.id;
     const [person, previous, membership] = await Promise.all([tx.get(ref('people', a.personId)), tx.get(ref('requests', id)), tx.get(ref('affiliations', id))]);
     if (!person.exists || !person.data().photoPaths?.length) fail('failed-precondition', 'Complete your profile and add a photograph first.');
-    if (!target.active || target.level === 'district') fail('invalid-argument', 'Choose an active area or cell committee.');
+    if (!target.active || ['state', 'district'].includes(target.level)) fail('invalid-argument', 'Choose an active area or cell committee.');
     if (membership.data()?.status === 'suspended') fail('failed-precondition', 'This affiliation is suspended. Contact this committee’s president or the Super Admin.');
     if (membership.data()?.status === 'active' || previous.data()?.status === 'pending') fail('already-exists', 'You already have a membership or pending request for this committee.');
     tx.set(ref('requests', id), { id, personId: a.personId, applicantUid: uid, applicantName: person.data().name, committeeId: target.id, committeeName: target.name, branch: target.branch, ancestorIds: target.ancestorIds, status: 'pending', createdAt: timestamp(), updatedAt: timestamp(), reviewedBy: '', reason: '' });
@@ -204,12 +372,12 @@ async function decideRequest(uid, data) {
   await db.runTransaction(async tx => {
     const a = await actor(uid, tx), requestRef = ref('requests', data.requestId), requestSnap = await tx.get(requestRef);
     if (!requestSnap.exists || requestSnap.data().status !== 'pending') fail('failed-precondition', 'This request has already been handled.');
-    const r = requestSnap.data(), target = await committee(r.committeeId, tx);
+    const r = requestSnap.data(), target = await reviewCommittee(r.committeeId, tx);
     if (data.decision === 'withdrawn') {
       if (r.applicantUid !== uid) fail('permission-denied', 'Withdraw only your own request.');
     } else {
       await staff(uid, tx);
-      if (!target.active || !canReview(a, target)) fail('permission-denied', 'Only this committee’s president or the Super Admin can review the request.');
+      if (r.applicantUid === uid || !target.active || !canReview(a, target)) fail('permission-denied', 'Only the assigned team checker can review this request.');
     }
     const person = await tx.get(ref('people', r.personId));
     if (!person.exists) fail('not-found', 'The member profile is unavailable.');
@@ -244,8 +412,8 @@ async function changeAffiliation(uid, data) {
   await db.runTransaction(async tx => {
     const a = await staff(uid, tx), linkRef = ref('affiliations', data.affiliationId), link = await tx.get(linkRef);
     if (!link.exists || !['active', 'suspended'].includes(link.data().status)) fail('failed-precondition', 'Choose a current committee affiliation.');
-    const target = await committee(link.data().committeeId, tx);
-    if (!canReview(a, target) || (data.status === 'active' && !target.active)) fail('permission-denied', 'Only this committee’s president or the Super Admin can change this affiliation.');
+    const target = await reviewCommittee(link.data().committeeId, tx);
+    if (link.data().accountUid === uid || !canReview(a, target) || (data.status === 'active' && !target.active)) fail('permission-denied', 'Only a separate assigned checker can change this affiliation.');
     const personId = link.data().personId;
     const links = await tx.get(db.collection('affiliations').where('personId', '==', personId).where('status', '==', 'active'));
     const active = links.docs.filter(s => s.id !== link.id).map(s => s.data());
@@ -263,7 +431,7 @@ async function affiliationDirectory(uid, data = {}) {
   const a = await staff(uid);
   const status = data.status === 'suspended' ? 'suspended' : 'active';
   let q = db.collection('affiliations').where('status', '==', status);
-  if (a.role !== 'superadmin') q = q.where('committeeId', '==', a.committeeId);
+  if (a.role !== 'superadmin') q = q.where('ancestorIds', 'array-contains', a.committeeId);
   else if (data.committeeId) q = q.where('committeeId', '==', (await committee(data.committeeId)).id);
   q = q.orderBy(FieldPath.documentId()).limit(51);
   if (data.cursor) q = q.startAfter(ref('affiliations', data.cursor).id);
@@ -272,7 +440,7 @@ async function affiliationDirectory(uid, data = {}) {
   return { affiliations: page.map((s, i) => ({ ...serialize(s.data(), s.id), personName: people[i].data()?.name || 'Member' })), nextCursor: snapshot.size > 50 ? page.at(-1).id : null };
 }
 async function lookupAccount(uid, data) {
-  if ((await staff(uid)).role !== 'superadmin') fail('permission-denied', 'Only the Super Admin can look up district accounts.');
+  await staff(uid);
   const phoneNumber = normalizePhone(data.mobile);
   const user = await getAuth().getUserByPhoneNumber(phoneNumber).catch(error => {
     if (error.code === 'auth/user-not-found') fail('not-found', 'This mobile number has not signed up yet. Create an invitation instead.');
@@ -282,6 +450,7 @@ async function lookupAccount(uid, data) {
   if (!account.exists) fail('failed-precondition', 'This account still needs to complete its member profile.');
   const person = await ref('people', account.data().personId).get();
   if (!person.exists) fail('failed-precondition', 'This account still needs to complete its member profile.');
+  if (!(await personVisible(uid, person.id))) fail('permission-denied', 'This account is outside your visible scope.');
   return { account: serialize(account.data(), account.id), person: serialize(person.data(), person.id) };
 }
 async function createCommittee(uid, data) {
@@ -292,11 +461,11 @@ async function createCommittee(uid, data) {
     if (a.role !== 'superadmin') fail('permission-denied', 'The Super Admin configures committee units.');
     const parent = await committee(data.parentId, tx);
     const level = data.level;
-    if (!parent.active || !((parent.level === 'district' && ['area', 'cell'].includes(level)) || (parent.level === 'area' && level === 'ward') || (parent.level === 'ward' && level === 'local'))) fail('invalid-argument', 'Choose a valid parent and child level.');
-    const id = `${level}-${parent.level === 'district' ? '' : parent.id + '-'}${slug(name)}`;
+    if (!parent.active || !((parent.level === 'state' && level === 'district') || (parent.level === 'district' && ['taluka', 'cell'].includes(level)) || (parent.level === 'taluka' && level === 'ward') || (parent.level === 'ward' && level === 'local'))) fail('invalid-argument', 'Choose a valid parent and child level.');
+    const id = `${level}-${parent.id}-${slug(name)}`;
     const existing = await tx.get(ref('committees', id));
     if (existing.exists) fail('already-exists', 'That committee already exists under this parent.');
-    tx.set(ref('committees', id), { id, name, level, parentId: parent.id, branch: level === 'cell' ? 'cell' : 'area', areaId: level === 'area' ? id : parent.areaId, ancestorIds: [...parent.ancestorIds, id], presidentUid: '', presidentName: '', pendingInvitationId: '', active: true, createdAt: timestamp(), updatedAt: timestamp() });
+    tx.set(ref('committees', id), { id, name, level, parentId: parent.id, branch: level === 'cell' ? 'cell' : level === 'district' ? 'district' : 'area', areaId: level === 'taluka' ? id : parent.areaId, teamId: teamLevels.includes(level) ? id : parent.teamId, appointmentTeamId: parent.teamId, ancestorIds: [...parent.ancestorIds, id], presidentUid: '', presidentName: '', pendingInvitationId: '', active: true, createdAt: timestamp(), updatedAt: timestamp() });
     audit(tx, uid, 'create-committee', id); bump(tx, uid);
   });
   return { ok: true };
@@ -308,10 +477,10 @@ async function staffState(uid, data) {
   // emulator and transactional approval/access maintenance.
   let requestQuery = db.collection('requests').where('status', '==', 'pending');
   let inviteQuery = db.collection('invitations').where('status', '==', 'pending');
-  let accountQuery = db.collection('accounts').where('role', '==', 'president');
+  let accountQuery = db.collection('accounts').where('role', 'in', ['president', 'maker', 'checker']);
   if (a.role !== 'superadmin') {
-    requestQuery = requestQuery.where('committeeId', '==', a.committeeId);
-    inviteQuery = inviteQuery.where('createdBy', '==', uid);
+    requestQuery = requestQuery.where('ancestorIds', 'array-contains', a.committeeId);
+    inviteQuery = inviteQuery.where('scopeIds', 'array-contains', a.committeeId);
   }
   const [requests, invitations, accounts, committees] = await Promise.all([requestQuery.get(), inviteQuery.get(), accountQuery.get(), db.collection('committees').get()]);
   const catalogue = committees.docs.map(s => ({ ...s.data(), id: s.id }));
@@ -370,7 +539,7 @@ async function statistics(uid, data) {
     const start = new Date(midnight.getTime() - ((period === 'week' ? 6 : 29) - i) * 86400000);
     return { start, end: new Date(start.getTime() + 86400000), label: start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', ...(period === 'week' ? { weekday: 'short' } : { day: 'numeric' }) }), fullLabel: start.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' }) };
   });
-  const catalogue = await db.collection('committees').where('level', '==', 'area').get();
+  const catalogue = await db.collection('committees').where('level', '==', 'taluka').get();
   const periodQuery = period === 'all' ? base : base.where('createdAt', '>=', series[0].start).where('createdAt', '<', new Date(midnight.getTime() + 86400000));
   const [total, periodTotal, today, values, distribution] = await Promise.all([
     base.count().get(), periodQuery.count().get(), base.where('createdAt', '>=', midnight).count().get(),
@@ -392,7 +561,7 @@ async function memberDetail(uid, data) {
   let allowed = await personVisible(uid, data.personId);
   if (!allowed && a.role !== 'member' && typeof data.requestId === 'string') {
     const r = await ref('requests', data.requestId).get();
-    if (r.exists && r.data().personId === data.personId && r.data().status === 'pending') allowed = canReview(await staff(uid), await committee(r.data().committeeId));
+    if (r.exists && r.data().personId === data.personId && r.data().status === 'pending') allowed = canViewScope(await staff(uid), await committee(r.data().committeeId));
   }
   if (!allowed) fail('permission-denied', 'This profile is outside your assigned scope.');
   const p = await ref('people', data.personId).get();
@@ -411,25 +580,27 @@ async function cancelInvitation(uid, data) {
   await db.runTransaction(async tx => {
     const a = await staff(uid, tx), s = await tx.get(ref('invitations', data.invitationId));
     if (!s.exists || s.data().status !== 'pending') fail('failed-precondition', 'This invitation is no longer pending.');
-    if (a.role !== 'superadmin' && s.data().createdBy !== uid) fail('permission-denied', 'Cancel only invitations created by you.');
+    if (a.role !== 'superadmin' && (a.role !== 'maker' || s.data().createdBy !== uid)) fail('permission-denied', 'Cancel only invitations created by you.');
     const c = s.data().committeeId ? await committee(s.data().committeeId, tx) : null;
     tx.update(s.ref, { status: 'cancelled', cancelledAt: timestamp(), cancelledBy: uid });
-    if (c?.pendingInvitationId === s.id) tx.update(ref('committees', c.id), { pendingInvitationId: '', updatedAt: timestamp() });
+    if (c?.[pendingSeatField(s.data().role)] === s.id) tx.update(ref('committees', c.id), { [pendingSeatField(s.data().role)]: '', updatedAt: timestamp() });
     audit(tx, uid, 'cancel-invitation', s.id); bump(tx, uid);
   });
   return { ok: true };
 }
-async function changeAppointment(uid, data) {
+async function changeAppointment(uid, data, approval) {
   await db.runTransaction(async tx => {
-    const a = await staff(uid, tx);
-    if (a.role !== 'superadmin') fail('permission-denied', 'Only the Super Admin can change appointments.');
+    const a = await approvedActor(tx, uid, approval, 'changeAppointment');
     if (typeof data.uid !== 'string' || data.uid === uid) fail('invalid-argument', 'Choose another account.');
     const s = await tx.get(ref('accounts', data.uid));
-    if (!s.exists || s.data().role === 'superadmin') fail('invalid-argument', 'Choose a member or president account.');
+    if (!s.exists || !['member', 'president'].includes(s.data().role)) fail('invalid-argument', 'Choose a member or president account.');
     const old = s.data(), target = data.committeeId ? await committee(data.committeeId, tx) : null;
     const oldCommittee = old.committeeId ? await committee(old.committeeId, tx) : null;
     const p = await tx.get(ref('people', old.personId));
-    if (target && (!target.active || target.level === 'district' || (target.presidentUid && target.presidentUid !== s.id) || target.pendingInvitationId)) fail('failed-precondition', 'Choose an active committee without another president or pending invitation.');
+    if (oldCommittee && !canAppoint(a, oldCommittee)) fail('permission-denied', 'This account is appointed outside your team authority.');
+    if (!oldCommittee && !(p.data()?.activeScopeIds || []).includes(a.committeeId)) fail('permission-denied', 'Choose a member in your team scope.');
+    if (target && !canAppoint(a, target)) fail('permission-denied', 'Choose an appointment handled by your team.');
+    if (target && (!target.active || (target.presidentUid && target.presidentUid !== s.id) || target.pendingInvitationId)) fail('failed-precondition', 'Choose an active committee without another president or pending invitation.');
     if (data.status && !['active', 'suspended'].includes(data.status)) fail('invalid-argument', 'Choose active or suspended.');
     const updates = { status: data.status || old.status, updatedAt: timestamp() };
     if (data.role === 'member') {
@@ -441,7 +612,7 @@ async function changeAppointment(uid, data) {
       if (oldCommittee && oldCommittee.id !== target.id && oldCommittee.presidentUid === s.id) tx.update(ref('committees', oldCommittee.id), { presidentUid: '', presidentName: '', updatedAt: timestamp() });
       tx.update(ref('committees', target.id), { presidentUid: s.id, presidentName: p.data()?.name || '', updatedAt: timestamp() });
     }
-    tx.update(s.ref, updates); audit(tx, uid, 'change-appointment', s.id, updates); bump(tx, s.id); bump(tx, uid);
+    tx.update(s.ref, updates); finishWork(tx, approval, { uid: s.id }); audit(tx, uid, 'change-appointment', s.id, updates); bump(tx, s.id); bump(tx, uid);
   });
   return { ok: true };
 }
@@ -449,7 +620,7 @@ async function setCommitteeActive(uid, data) {
   const a = await staff(uid);
   if (a.role !== 'superadmin') fail('permission-denied', 'Only the Super Admin manages committee activation.');
   const target = await committee(data.committeeId);
-  if (target.level === 'district' || typeof data.active !== 'boolean') fail('invalid-argument', 'Choose an area, ward, local committee or cell.');
+  if (target.level === 'state' || typeof data.active !== 'boolean') fail('invalid-argument', 'Choose an area, ward, local committee or cell.');
   if (data.active) {
     const parent = await committee(target.parentId);
     if (!parent.active) fail('failed-precondition', 'Activate the parent committee first.');
@@ -490,7 +661,8 @@ export const dmaApi = onCall({ region: 'asia-south1', memory: '512MiB', timeoutS
     }
     const uid = uidOf(request);
     if (operation === 'createNativeSessionToken') return { token: await getAuth().createCustomToken(uid) };
-    const handlers = { mySetup, uploadPhoto, completeProfile, createInvitation, addMember, requestAffiliation, decideRequest, leaveAffiliation, changeAffiliation, affiliationDirectory, lookupAccount, createCommittee, staffState, memberDirectory, memberDetail, getPhoto, cancelInvitation, changeAppointment, statistics, setCommitteeActive, adminHistory };
+    if (['addMember', 'createInvitation', 'changeAppointment'].includes(operation)) return await submitWork(uid, operation, payload);
+    const handlers = { configureTeam, reviewWork, withdrawWork, workDirectory, workDetail, workPhoto, mySetup, uploadPhoto, completeProfile, requestAffiliation, decideRequest, leaveAffiliation, changeAffiliation, affiliationDirectory, lookupAccount, createCommittee, staffState, memberDirectory, memberDetail, getPhoto, cancelInvitation, statistics, setCommitteeActive, adminHistory };
     const handler = handlers[operation];
     if (!Object.hasOwn(handlers, operation) || typeof handler !== 'function') fail('invalid-argument', 'Unknown action.');
     return await handler(uid, payload);
@@ -582,9 +754,9 @@ export const birthdayGreetings = onSchedule({ region: 'asia-south1', schedule: '
 });
 
 async function notifyWorkspaces(scopeIds, ownerIds = []) {
-  const ids = [...new Set([districtId, ...scopeIds])].filter(id => typeof id === 'string' && /^[\w-]{1,160}$/.test(id));
+  const ids = [...new Set([stateId, districtId, ...scopeIds])].filter(id => typeof id === 'string' && /^[\w-]{1,160}$/.test(id));
   const committees = await db.getAll(...ids.map(id => ref('committees', id)));
-  const uids = [...new Set([...ownerIds, ...committees.map(s => s.data()?.presidentUid)])].filter(Boolean);
+  const uids = [...new Set([...ownerIds, ...committees.flatMap(s => [s.data()?.presidentUid, s.data()?.makerUid, s.data()?.checkerUid]), ...(await db.collection('accounts').where('role', '==', 'superadmin').get()).docs.map(s => s.id)])].filter(Boolean);
   if (!uids.length) return;
   const batch = db.batch();
   for (const uid of uids) batch.set(ref('workspaceEvents', uid), { updatedAt: timestamp() }, { merge: true });
@@ -614,4 +786,9 @@ export const accountUpdates = onDocumentWritten(trigger('accounts/{uid}'), async
     const c = await ref('committees', id).get(); scopes.push(...(c.data()?.ancestorIds || []));
   }
   return notifyWorkspaces(scopes, [event.params.uid, before?.createdBy, after?.createdBy].filter(id => id && id !== 'bootstrap' && id !== 'migration'));
+});
+
+export const workUpdates = onDocumentWritten(trigger('workItems/{id}'), event => {
+  const before = event.data?.before.data(), after = event.data?.after.data();
+  return notifyWorkspaces([...(before?.scopeIds || []), ...(after?.scopeIds || [])], [before?.createdBy, after?.createdBy, after?.reviewedBy]);
 });

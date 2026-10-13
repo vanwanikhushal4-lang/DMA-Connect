@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 
 export const districtId = 'dma-district';
+export const stateId = 'dma-state';
+export const teamLevels = ['state', 'district', 'taluka'];
+export const seatField = role => ({ president: 'presidentUid', maker: 'makerUid', checker: 'checkerUid' })[role];
+export const pendingSeatField = role => ({ president: 'pendingInvitationId', maker: 'pendingMakerInvitationId', checker: 'pendingCheckerInvitationId' })[role];
 export const areas = ['Belapur', 'Nerul', 'Vashi', 'Turbhe', 'Kopar Khairane', 'Ghansoli', 'Airoli', 'Digha'];
 export const cells = ['OBC', 'Maratha', 'Muslim'];
 export const slug = name => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -11,22 +15,22 @@ export function normalizePhone(value) {
   if (/^91[6-9]\d{9}$/.test(digits)) return '+' + digits;
   throw new Error('Enter a valid Indian mobile number.');
 }
-export function seedCommittees(name = 'Navi Mumbai') {
-  const root = { id: districtId, name, level: 'district', branch: 'district', parentId: '', areaId: '', ancestorIds: [districtId], presidentUid: '', active: true };
-  return [root, ...areas.map(name => ({ id: 'area-' + slug(name), name, level: 'area', branch: 'area', parentId: districtId, areaId: 'area-' + slug(name), ancestorIds: [districtId, 'area-' + slug(name)], presidentUid: '', active: true })),
-    ...cells.map(name => ({ id: 'cell-' + slug(name), name: name + ' Cell', level: 'cell', branch: 'cell', parentId: districtId, areaId: '', ancestorIds: [districtId, 'cell-' + slug(name)], presidentUid: '', active: true }))];
+export function seedCommittees(name = 'Navi Mumbai', stateName = 'Maharashtra') {
+  const state = { id: stateId, name: stateName, level: 'state', branch: 'state', parentId: '', areaId: '', ancestorIds: [stateId], teamId: stateId, appointmentTeamId: stateId, presidentUid: '', active: true };
+  const root = { id: districtId, name, level: 'district', branch: 'district', parentId: stateId, areaId: '', ancestorIds: [stateId, districtId], teamId: districtId, appointmentTeamId: stateId, presidentUid: '', active: true };
+  return [state, root, ...areas.map(name => ({ id: 'area-' + slug(name), name, level: 'taluka', branch: 'area', parentId: districtId, areaId: 'area-' + slug(name), ancestorIds: [stateId, districtId, 'area-' + slug(name)], teamId: 'area-' + slug(name), appointmentTeamId: districtId, presidentUid: '', active: true })),
+    ...cells.map(name => ({ id: 'cell-' + slug(name), name: name + ' Cell', level: 'cell', branch: 'cell', parentId: districtId, areaId: '', ancestorIds: [stateId, districtId, 'cell-' + slug(name)], teamId: districtId, appointmentTeamId: districtId, presidentUid: '', active: true }))];
 }
 export function canAppoint(actor, target) {
-  if (actor?.status !== 'active' || !target?.active || target.level === 'district') return false;
-  if (actor.role === 'superadmin') return true;
-  if (actor.role !== 'president' || target.parentId !== actor.committeeId) return false;
-  return (actor.level === 'area' && target.level === 'ward') || (actor.level === 'ward' && target.level === 'local');
+  return actor?.status === 'active' && actor.role === 'maker' && target?.active === true
+    && teamLevels.includes(actor.level) && target.appointmentTeamId === actor.committeeId;
 }
 export function canReview(actor, committee) {
-  return actor?.status === 'active' && (actor.role === 'superadmin' || (actor.role === 'president' && actor.committeeId === committee.id && committee.presidentUid === actor.uid));
+  return actor?.status === 'active' && actor.role === 'checker' && committee?.active === true
+    && committee.teamId === actor.committeeId && committee.teamCheckerUid === actor.uid;
 }
 export function canViewScope(actor, committee) {
-  return actor?.status === 'active' && (actor.role === 'superadmin' || (actor.role === 'president' && committee.ancestorIds.includes(actor.committeeId)));
+  return actor?.status === 'active' && (actor.role === 'superadmin' || (['president', 'maker', 'checker'].includes(actor.role) && committee.ancestorIds.includes(actor.committeeId)));
 }
 export function validateProfile(input, verifiedPhone, { photoRequired = true } = {}) {
   const clean = (key, max, required = true) => {

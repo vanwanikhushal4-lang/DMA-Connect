@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Text, View } from 'react-native';
 import { useCommunity } from '../context/CommunityContext';
 import { useSession } from '../context/SessionContext';
+import { committeePath } from '../lib/community';
 import { api } from '../services/api';
 import { Screen, ui } from '../components/Screen';
 import { SelectField } from '../components/SelectField';
@@ -21,13 +22,13 @@ export function CommitteeScreen() {
   return <Screen title="My committees" description="Join an area committee, a cell, or both. Each committee approves its own membership requests.">
     {!!(error || catalogueError) && <Text accessibilityRole="alert" style={ui.error}>{error || catalogueError}</Text>}{!!message && <Text accessibilityRole="alert" style={ui.success}>{message}</Text>}
     <View style={ui.card}><Text style={ui.heading}>Area committee</Text>
-      <SelectField label="Area" value={areaId} options={committees.filter(c => c.level === 'area').map(c => ({ value: c.id, label: c.name }))} onChange={v => { setArea(v); setWard(''); setLocal(''); }} />
-      {!!wards.length && <SelectField label="Ward" value={wardId} options={[{ value: '', label: 'Area committee only' }, ...wards.map(c => ({ value: c.id, label: c.name }))]} onChange={v => { setWard(v); setLocal(''); }} />}
-      {!!locals.length && <SelectField label="Village or locality" value={localId} options={[{ value: '', label: 'Ward committee only' }, ...locals.map(c => ({ value: c.id, label: c.name }))]} onChange={setLocal} />}
+      <SelectField label="Area" value={areaId} options={committees.filter(c => c.level === 'taluka').map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))} onChange={v => { setArea(v); setWard(''); setLocal(''); }} />
+      {!!wards.length && <SelectField label="Ward" value={wardId} options={[{ value: '', label: 'Area committee only' }, ...wards.map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))]} onChange={v => { setWard(v); setLocal(''); }} />}
+      {!!locals.length && <SelectField label="Village or locality" value={localId} options={[{ value: '', label: 'Ward committee only' }, ...locals.map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))]} onChange={setLocal} />}
       {!!selectedArea && <Text style={ui.body}>Requesting: {committees.find(c => c.id === selectedArea)?.name}</Text>}
       <ActionButton title={unavailable(selectedArea) ? 'Already joined or requested' : 'Request area membership'} disabled={!selectedArea || unavailable(selectedArea) || !!busy} busy={busy === 'area'} onPress={() => void act('requestAffiliation', { committeeId: selectedArea }, 'area', 'Your area request has been submitted for approval.')} />
     </View>
-    <View style={ui.card}><Text style={ui.heading}>Cell committee</Text><SelectField label="Cell" value={cellId} options={committees.filter(c => c.level === 'cell').map(c => ({ value: c.id, label: c.name }))} onChange={setCell} />
+    <View style={ui.card}><Text style={ui.heading}>Cell committee</Text><SelectField label="Cell" value={cellId} options={committees.filter(c => c.level === 'cell').map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))} onChange={setCell} />
       <ActionButton title={unavailable(cellId) ? 'Already joined or requested' : 'Request cell membership'} disabled={!cellId || unavailable(cellId) || !!busy} busy={busy === 'cell'} onPress={() => void act('requestAffiliation', { committeeId: cellId }, 'cell', 'Your cell request has been submitted for approval.')} />
     </View>
     <View style={ui.card}><Text style={ui.heading}>Approved affiliations</Text>{!affiliations.some(a => a.status === 'active') && <Text style={ui.body}>Approved memberships will appear here.</Text>}

@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useCommunity } from '../context/CommunityContext';
 import type { PersonDraft } from '../lib/community';
-import { displayDob, validatePerson } from '../lib/community';
+import { displayDob, validatePerson, committeePath } from '../lib/community';
 import { formatDobInput, normalizeMobile } from '../lib/members';
 import { api } from '../services/api';
 import { MemberField } from './MemberField';
@@ -55,7 +55,7 @@ export function PersonForm({ initial, onSubmit, submitTitle = 'Save profile', lo
     {lockMobile && <Text style={ui.body}>Your verified mobile number is linked to your account.</Text>}
     <MemberField label="Residence" icon={MapPin} value={draft.residence} onChangeText={v => change('residence', v)} error={errors.residence} editable={!busy} multiline maxLength={500} />
     <MemberField label="Date of birth" icon={CalendarDays} value={draft.dob} onChangeText={v => change('dob', formatDobInput(v))} error={errors.dob} placeholder="DD / MM / YYYY" keyboardType="number-pad" maxLength={10} editable={!busy} onIconPress={() => setCalendar(true)} iconLabel="Choose date of birth" />
-    <SelectField label="Home area" value={draft.areaId} options={committees.filter(c => c.level === 'area').map(c => ({ value: c.id, label: c.name }))} onChange={v => change('areaId', v)} error={errors.areaId} disabled={busy} placeholder="Choose your home area" />
+    <SelectField label="Home area" value={draft.areaId} options={committees.filter(c => c.level === 'taluka').map(c => ({ value: c.id, label: c.name, description: committeePath(c, committees) }))} onChange={v => change('areaId', v)} error={errors.areaId} disabled={busy} placeholder="Choose your home area" />
     {!!catalogueError && <Text style={ui.error}>{catalogueError}</Text>}
     <View style={ui.divider} /><Text style={ui.heading}>Photographs</Text><Text style={ui.body}>Add one profile photo and up to two extra photographs.</Text>
     <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>{draft.photoPaths.map((path, i) => <View key={path} style={{ width: 94, gap: 7 }}>

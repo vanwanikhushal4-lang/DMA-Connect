@@ -1,11 +1,11 @@
-export type CommitteeLevel = 'district' | 'area' | 'ward' | 'local' | 'cell';
+export type CommitteeLevel = 'state' | 'district' | 'taluka' | 'ward' | 'local' | 'cell';
 export type Committee = {
-  id: string; name: string; level: CommitteeLevel; branch: 'district' | 'area' | 'cell';
+  id: string; name: string; level: CommitteeLevel; branch: 'state' | 'district' | 'area' | 'cell';
   parentId: string; areaId: string; ancestorIds: string[]; presidentUid: string;
-  presidentName?: string; pendingInvitationId?: string; active: boolean;
+  presidentName?: string; pendingInvitationId?: string; active: boolean; teamId: string; appointmentTeamId: string; makerUid?: string; checkerUid?: string; makerName?: string; checkerName?: string; pendingMakerInvitationId?: string; pendingCheckerInvitationId?: string;
 };
 export type Account = {
-  uid: string; personId: string; role: 'superadmin' | 'president' | 'member';
+  uid: string; personId: string; role: 'superadmin' | 'president' | 'member' | 'maker' | 'checker';
   level: CommitteeLevel | 'member'; committeeId: string; parentCommitteeId: string;
   status: 'active' | 'suspended'; phoneNumber: string; districtId: string; createdBy: string; createdAt: string;
 };
@@ -20,18 +20,28 @@ export type Person = PersonDraft & {
 };
 export type Affiliation = { id: string; personId: string; accountUid: string; committeeId: string; committeeName: string; branch: 'area' | 'cell'; status: 'active' | 'left' | 'suspended'; createdAt: string };
 export type AffiliationRequest = { id: string; personId: string; applicantUid: string; applicantName: string; committeeId: string; committeeName: string; branch: 'area' | 'cell'; status: 'pending' | 'approved' | 'declined' | 'withdrawn'; reason: string; createdAt: string };
-export type Invitation = { id: string; name: string; email: string; phoneNumber: string; role: 'president' | 'member'; level: CommitteeLevel | 'member'; committeeId: string; committeeName: string; expiresAt: string; status: string };
+export type Invitation = { id: string; name: string; email: string; phoneNumber: string; role: 'president' | 'member' | 'maker' | 'checker'; level: CommitteeLevel | 'member'; committeeId: string; committeeName: string; expiresAt: string; status: string };
 export const emptyPerson: PersonDraft = { name: '', email: '', mobile: '', residence: '', dob: '', areaId: '', socials: { facebook: '', linkedin: '', instagram: '' }, photoPaths: [], birthdayEmailsEnabled: true };
 export function accountRole(account: Account | null) {
   if (!account) return 'Member';
   if (account.role === 'superadmin') return 'Super Admin';
   if (account.role === 'member') return 'Member';
-  return ({ area: 'Area president', ward: 'Ward president', local: 'Village / local president', cell: 'Cell president', district: 'District president', member: 'Member' })[account.level];
+  const levelName = ({ state: 'State', district: 'District', taluka: 'Taluka', ward: 'Ward', local: 'Village / local', cell: 'Cell', member: 'Member' })[account.level];
+  if (account.role === 'maker' || account.role === 'checker') return levelName + ' ' + account.role;
+  return ({ state: 'State president', taluka: 'Taluka president', ward: 'Ward president', local: 'Village / local president', cell: 'Cell president', district: 'District president', member: 'Member' })[account.level];
 }
 export function canCreatePresident(account: Account | null, committee: Committee) {
-  if (!account || account.status !== 'active' || !committee.active || committee.level === 'district') return false;
-  return account.role === 'superadmin' || (account.role === 'president' && committee.parentId === account.committeeId && ((account.level === 'area' && committee.level === 'ward') || (account.level === 'ward' && committee.level === 'local')));
+  return !!account && account.status === 'active' && account.role === 'maker' && committee.active && committee.appointmentTeamId === account.committeeId;
 }
+export const isMaker = (account: Account | null) => account?.status === 'active' && account.role === 'maker';
+export const isChecker = (account: Account | null) => account?.status === 'active' && account.role === 'checker';
+export function canReviewCommittee(account: Account | null, committee: Committee) {
+  return isChecker(account) && committee.teamId === account?.committeeId;
+}
+export function committeePath(committee: Committee, catalogue: Committee[]) {
+  return committee.ancestorIds.map(id => catalogue.find(c => c.id === id)?.name).filter(Boolean).join(' / ');
+}
+export type WorkItem = { id: string; operation: 'addMember' | 'createInvitation' | 'changeAppointment'; name: string; teamId: string; teamName: string; createdBy: string; createdByName: string; status: 'pending' | 'approved' | 'declined' | 'withdrawn'; reviewedBy: string; reviewedByName?: string; reason: string; createdAt: string; reviewedAt?: string; phoneNumber?: string; committeeId?: string; role?: string; payload?: Record<string, unknown> };
 export function isStaff(account: Account | null) { return !!account && account.status === 'active' && account.role !== 'member'; }
 export function toIsoDob(display: string) { const [d, m, y] = display.split('/'); return y && m && d ? `${y}-${m}-${d}` : display; }
 export function displayDob(iso: string) { const [y, m, d] = iso.split('-'); return y && m && d ? `${d}/${m}/${y}` : iso; }
