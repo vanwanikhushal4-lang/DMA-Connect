@@ -602,6 +602,17 @@
         }
       ],
       "density": "SPARSE_ANY"
+    },
+    {
+      "collectionGroup": "committees",
+      "queryScope": "COLLECTION",
+      "density": "SPARSE_ANY",
+      "fields": [
+        {
+          "fieldPath": "parentId",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

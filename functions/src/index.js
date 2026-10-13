@@ -463,8 +463,8 @@ async function createCommittee(uid, data) {
     const level = data.level;
     if (!parent.active || !((parent.level === 'state' && level === 'district') || (parent.level === 'district' && ['taluka', 'cell'].includes(level)) || (parent.level === 'taluka' && level === 'ward') || (parent.level === 'ward' && level === 'local'))) fail('invalid-argument', 'Choose a valid parent and child level.');
     const id = `${level}-${parent.id}-${slug(name)}`;
-    const existing = await tx.get(ref('committees', id));
-    if (existing.exists) fail('already-exists', 'That committee already exists under this parent.');
+    const [existing, siblings] = await Promise.all([tx.get(ref('committees', id)), tx.get(db.collection('committees').where('parentId', '==', parent.id))]);
+    if (existing.exists || siblings.docs.some(s => s.data().level === level && slug(s.data().name) === slug(name))) fail('already-exists', 'That committee already exists under this parent.');
     tx.set(ref('committees', id), { id, name, level, parentId: parent.id, branch: level === 'cell' ? 'cell' : level === 'district' ? 'district' : 'area', areaId: level === 'taluka' ? id : parent.areaId, teamId: teamLevels.includes(level) ? id : parent.teamId, appointmentTeamId: parent.teamId, ancestorIds: [...parent.ancestorIds, id], presidentUid: '', presidentName: '', pendingInvitationId: '', active: true, createdAt: timestamp(), updatedAt: timestamp() });
     audit(tx, uid, 'create-committee', id); bump(tx, uid);
   });

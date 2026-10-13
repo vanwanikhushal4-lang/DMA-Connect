@@ -10,7 +10,7 @@ import { SelectField } from '../components/SelectField';
 
 export function MemberRegistration() {
   const { account } = useSession(), { committees } = useCommunity(), { addMember } = useMembers();
-  const [committeeId, setCommittee] = useState(account?.role === 'maker' ? account.committeeId : '');
+  const [committeeId, setCommittee] = useState(account?.role === 'maker' && account.level === 'taluka' ? account.committeeId : '');
   const [success, setSuccess] = useState(''), [formKey, setFormKey] = useState(0);
   const available = committees.filter(c => !['state', 'district'].includes(c.level) && (account?.role === 'superadmin' || c.ancestorIds.includes(account?.committeeId || '')));
   return <Screen title="Add a member" description="Submit a member profile for your team’s checker to review. Membership becomes active only after approval.">

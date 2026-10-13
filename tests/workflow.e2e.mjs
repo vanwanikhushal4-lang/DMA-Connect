@@ -154,6 +154,7 @@ try {
     await call(dc, 'reviewWork', { workId: restore.workId, decision: 'approved' });
   });
   await test('multiple districts can contain identically named Talukas with separate maker/checker authority', async () => {
+    await assert.rejects(call(root, 'createCommittee', { name: 'Vashi', level: 'taluka', parentId: 'dma-district' }));
     await call(root, 'createCommittee', { name: 'Second Demo District', level: 'district', parentId: 'dma-state' });
     const district = 'district-dma-state-second-demo-district';
     await call(root, 'createCommittee', { name: 'Vashi', level: 'taluka', parentId: district });
