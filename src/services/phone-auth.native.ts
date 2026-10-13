@@ -6,6 +6,7 @@ import { auth } from './auth-client';
 import { api } from './api';
 import { emulatorHost, usingEmulators } from './firebase';
 import { firebaseConfig } from './firebase-config';
+import { requirePhoneOtp } from './otp-config';
 import type { OtpConfirmation } from './phone-auth';
 
 async function nativeAuth() {
@@ -25,6 +26,7 @@ async function bridge() {
   await signInWithCustomToken(auth, token);
 }
 export async function beginPhoneOtp(phoneNumber: string, linking = false, onAutomaticError?: (error: unknown) => void): Promise<OtpConfirmation> {
+  requirePhoneOtp();
   const instance = await nativeAuth();
   if (linking && auth.currentUser) {
     const { token } = await api<{ token: string }>('createNativeSessionToken');

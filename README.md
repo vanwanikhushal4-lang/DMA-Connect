@@ -12,7 +12,9 @@ npm ci --prefix functions
 npm run web -- --port 8093
 ```
 
-The mobile app uses React Native Firebase for phone verification. **A development build is required; Expo Go cannot run this native authentication module.** Expo generates `ios/` and `android/` from `app.json` and config plugins. Do not edit generated native projects.
+Live SMS OTP is deferred and will use **Twilio Verify** later. The current development preview uses Firebase Auth emulators for simulated codes. Live Firebase SMS calls are disabled on both web and native clients. See [OTP integration plan](docs/OTP-INTEGRATION.md).
+
+The current mobile preview includes React Native Firebase for emulator phone verification. **A development build is required; Expo Go cannot run this native authentication module.** Expo generates `ios/` and `android/` from `app.json` and config plugins. Do not edit generated native projects.
 
 ```sh
 npm run ios
@@ -26,7 +28,7 @@ For signed device builds use the `development`, `preview` or `production` EAS pr
 
 ## Implemented flow
 
-- Own-phone OTP sign-in and signup; manual code entry, resend cooldown, iOS SMS autofill, Android automatic verification support. Existing email/password users can sign in and verify/link their own phone while preserving their UID.
+- Own-phone OTP sign-in and signup in emulator mode; manual code entry, resend cooldown, iOS SMS autofill and native verification handling. Existing email/password users can sign in and verify/link their own phone in the emulator while preserving their UID. Live OTP awaits the later Twilio integration.
 - A central **Super Admin** oversees the district. Area presidents report to Super Admin; ward presidents report to their area president; village/local presidents report to their ward president. Cell presidents report directly to Super Admin.
 - Super Admin can invite any president or member, find a self-signed account by verified phone, appoint/transfer/demote a president, suspend/restore accounts, create committee units, and deactivate/reactivate units. Presidents can invite only their immediate permitted lower level within their own branch. Invitations expire after 14 days and activate only after the recipient verifies the invited phone and completes the profile.
 - Member signup collects name, email, verified mobile, residence, DOB, home area, one required photograph and up to two additional photographs. Facebook, LinkedIn and Instagram fields are included and optional. Birthday email preference is editable.
@@ -67,7 +69,7 @@ A scheduled function checks every 30 minutes from **9:00 AM India time**. An opt
 
 Resend is the email provider. No key ships to the app. `RESEND_API_KEY` is a server Secret Manager secret; `BIRTHDAY_FROM_EMAIL` must use a verified sender domain. Known send failures retry for seven days, up to 80 queued records per run. Each person has one annual delivery record across committees. Resend idempotency keys protect retry requests for 24 hours; ambiguous results after 23 hours are flagged for operator review instead of risking a duplicate. Provider acceptance is recorded as `sent`; it is not a guarantee of inbox delivery. History shows failures and review states.
 
-Firebase/React Native Firebase and Resend SDKs are free libraries. **Production SMS is billed per message and requires Firebase Blaze**. Functions, Storage and Scheduler also require a billing-enabled project; included allowances do not imply unlimited free operation. Resend's free email allowance has a daily/monthly cap. See [Firebase pricing](https://firebase.google.com/pricing) and [Resend pricing](https://resend.com/pricing).
+Firebase/React Native Firebase and Resend SDKs are free libraries. App development continues without enabling Firebase billing or activating live SMS. Twilio Verify is the selected future SMS provider; its server credentials must never be shipped in the app. The current Cloud Functions, Storage and Scheduler production deployment separately requires a billing-enabled Firebase project, so changing the SMS provider alone does not deploy that backend. Resend's free email allowance has a daily/monthly cap. See [Firebase pricing](https://firebase.google.com/pricing) and [Resend pricing](https://resend.com/pricing).
 
 ## Local testing
 
@@ -79,7 +81,7 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true npm run web -- --port 8093
 EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true npm run ios -- --port 8093
 ```
 
-SMS codes are printed by the Auth emulator; they are not delivered to a handset. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` to the development computer's LAN IP for a physical phone, or `10.0.2.2` for the standard Android emulator. Restart Metro without the flag to use live services.
+SMS codes are printed by the Auth emulator; they are not delivered to a handset. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` to the development computer's LAN IP for a physical phone, or `10.0.2.2` for the standard Android emulator. Restarting Metro without the flag selects live data services, but live phone signup stays unavailable until Twilio is integrated. Existing email sign-in remains available.
 
 ```sh
 npm run lint
@@ -96,6 +98,6 @@ npx expo export --platform all
 
 ## Live activation and migration
 
-Follow [Deployment](docs/DEPLOYMENT.md). Current implementation can run against emulators; live services are not fully activated until billing, the owner phone/district name and email sender are supplied. Do not publish the client pointing to production until deployment and real OTP/email smoke tests pass.
+Follow [Deployment](docs/DEPLOYMENT.md). Development runs against emulators without waiting for billing. Live backend activation is a later step, and live OTP integration is explicitly deferred to Twilio. Do not publish the client pointing to production until deployment and the required real OTP/email smoke tests pass.
 
 The previous `presidents/{uid}/members/{mobile}` records remain intact. Migration is explicit, uses a confirmed destination committee, reports duplicate identities, preserves original sources/timestamps and never automatically turns a legacy descriptive role into administrator access. Setup and migration scripts are dry runs unless `--apply` is passed.

@@ -1,8 +1,10 @@
 import { linkWithPhoneNumber, RecaptchaVerifier, signInWithPhoneNumber, signOut } from 'firebase/auth';
 import { auth } from './auth-client';
 import { usingEmulators } from './firebase';
+import { requirePhoneOtp } from './otp-config';
 export type OtpConfirmation = { confirm: (code: string) => Promise<void>; dispose: () => void };
 export async function beginPhoneOtp(phoneNumber: string, linking = false, _onAutomaticError?: (error: unknown) => void): Promise<OtpConfirmation> {
+  requirePhoneOtp();
   if (typeof document === 'undefined') throw new Error('Phone verification is available in the mobile app or a browser.');
   const container = document.createElement('div');
   document.body.appendChild(container);

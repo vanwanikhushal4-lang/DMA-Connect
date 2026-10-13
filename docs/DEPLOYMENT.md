@@ -1,18 +1,18 @@
 # DMA Connect — live activation
 
-The implementation is locally testable and the new Firestore indexes have been deployed. New production rules, Functions, photo storage and birthday sender are still pending activation. Existing production member records are preserved.
+The implementation is locally testable and the new Firestore indexes have been deployed. Development continues with emulators without waiting for billing. Live SMS is deferred to a later Twilio Verify integration; do not activate Firebase Phone Authentication. New production rules, Functions, photo storage and birthday sender are still pending activation. Existing production member records are preserved.
 
 ## Values required from the owner
 
 1. The first Super Admin's Indian mobile number and the district display name. Do not derive the owner from whoever last tested the preview.
 2. A Resend account, a verified sender domain and the chosen From address. Store the API key directly in Firebase Secret Manager. Do not put it in chat, Git, an Expo public environment variable or a mobile bundle.
-3. Approval to enable Blaze billing for this project. Firebase production phone OTP is charged per SMS; Functions/Storage/Scheduler also require billing. Set an appropriate billing budget/alert. Alerts are notifications, not a hard spending cap.
+3. A deployment decision when the owner is ready to go live. The currently selected Firebase Functions/Storage/Scheduler backend requires Blaze; SMS will use Twilio separately. Do not link billing while it is deferred. Any later billing activation requires explicit approval. Set an appropriate billing budget/alert if activated; alerts are notifications, not a hard spending cap.
 
 Project: `dma-connect-foundation`, project number `536704319606`. Firestore database: **`dma-connect`**, Enterprise Native, **`asia-south1`**. Never silently use the `(default)` database. App bundle/package: `org.dmafoundation.connect`.
 
 ## Configure services
 
-- Enable Firebase Phone Authentication alongside the existing Email/Password provider. Restrict SMS regions to **India**, since the app accepts Indian mobiles. Keep localhost authorised for development and the production web origin authorised if web is distributed.
+- Keep the existing Email/Password provider. Live phone verification will be performed server-side by Twilio Verify, followed by a Firebase custom-token session; see [OTP integration plan](OTP-INTEGRATION.md). Firebase's production Phone Authentication SMS provider is not part of the selected rollout. Keep localhost authorised for development and the production web origin authorised if web is distributed.
 - Provision the default Firebase Storage bucket `dma-connect-foundation.firebasestorage.app` in **Mumbai** with public access prevented and Firebase Storage rules. No public photo download tokens are used. Deploy `storage.rules`, which denies direct client reads and writes; the authenticated server proxy is the access path.
 - Enable the required Functions, Cloud Run, Artifact Registry, Cloud Build, Eventarc, Pub/Sub, Scheduler and Secret Manager APIs. Firebase deployment checks most of these after billing is enabled.
 - Check the function runtime service account has datastore access, Firebase Authentication user management, private object read/write access to the bucket and token-signing access. Custom token creation requires `iam.serviceAccounts.signBlob`; grant `roles/iam.serviceAccountTokenCreator` **on that runtime service account**, not on every account. Do not distribute an Admin service-account key to the app.
@@ -63,14 +63,14 @@ Registered Firebase native apps:
 - iOS `1:536704319606:ios:b8359d5b5fa2f41e3e5f57`
 - Android `1:536704319606:android:aec3ed2447aa26513e5f57`
 
-Both configuration files are already checked into the project. RNFirebase config plugins generate the phone-auth reCAPTCHA URL scheme. A simulator uses reCAPTCHA fallback for real phone verification; physical iOS devices can use APNs silent verification after the APNs key and background capability are configured through Expo/EAS. Fallback must be verified on a real build. Android needs the **SHA-1 and SHA-256 fingerprints for the actual signing key** registered with Firebase; rebuild after downloading an updated `google-services.json` where needed.
+Both configuration files are already checked into the project. The current RNFirebase native module and phone-auth URL scheme support the emulator preview; they do not activate live SMS. The later Twilio SMS flow will call a trusted server and sign in to Firebase using its returned custom token, so Firebase phone-auth APNs/reCAPTCHA setup is not a requirement for that flow. Test the actual Twilio flow on iOS and Android after integration.
 
 ```sh
 npx eas-cli@latest build --platform ios --profile development-simulator
 npx eas-cli@latest build --platform android --profile development
 ```
 
-A development build is required; Expo Go is unsupported for native phone auth. Do not enable app-verification bypasses in production. Emulators are opt-in, development-only, use `demo-dma-connect`, and do not send SMS or email.
+A development build is required for the current native emulator module. Do not enable app-verification bypasses in production. Emulators are opt-in, development-only, use `demo-dma-connect`, and do not send SMS or email. Both phone-auth entry points reject live OTP requests until Twilio is integrated.
 
 ## Legacy records
 
@@ -87,6 +87,8 @@ Review the dry run, resolve duplicate-phone conflicts, then apply. Original `pre
 
 - [Firebase pricing](https://firebase.google.com/pricing)
 - [RNFirebase phone authentication](https://rnfirebase.io/auth/phone-auth)
+- [Twilio Verify](https://www.twilio.com/docs/verify/api)
+- [Firebase custom tokens](https://firebase.google.com/docs/auth/admin/create-custom-tokens)
 - [Expo and Firebase](https://docs.expo.dev/guides/using-firebase/)
 - [Resend pricing](https://resend.com/pricing)
 - [Resend idempotency keys](https://resend.com/docs/dashboard/emails/idempotency-keys)

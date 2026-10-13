@@ -15,6 +15,7 @@ import { ActionButton } from '../components/ActionButton';
 import { MemberField } from '../components/MemberField';
 import { colors } from '../theme';
 import { usingEmulators } from '../services/firebase';
+import { phoneOtpAvailable, phoneOtpUnavailableMessage } from '../services/otp-config';
 
 export function AccountScreen() {
   const session = useSession();
@@ -42,7 +43,7 @@ export function AccountScreen() {
   return <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
     <View style={{ paddingHorizontal: 22, paddingVertical: 15, alignSelf: 'center', width: '100%', maxWidth: 780 }}><Brand /></View>
     {usingEmulators && <View style={{ paddingHorizontal: 22 }}><Text style={ui.body}>Test mode · SMS codes are simulated</Text></View>}
-    <Screen title={confirmation ? 'Verify your mobile' : session.user ? 'Verify your phone number' : 'Welcome to DMA Connect'} description={confirmation ? 'Enter the code sent to +91 ' + phone : 'Sign in or create your member account using your own mobile number.'}>
+    <Screen title={confirmation ? 'Verify your mobile' : session.user ? 'Verify your phone number' : 'Welcome to DMA Connect'} description={confirmation ? (usingEmulators ? 'Enter the test code for +91 ' : 'Enter the code sent to +91 ') + phone : 'Sign in or create your member account using your own mobile number.'}>
       {!!session.error && <View style={ui.card}><Text style={ui.error}>{session.error}</Text><ActionButton title="Retry loading account" secondary onPress={session.retry} /><ActionButton title="Sign out" secondary onPress={() => void session.signOut()} /></View>}
       <View style={ui.card}>
         {legacy && !session.user ? <>
@@ -59,8 +60,8 @@ export function AccountScreen() {
           <Pressable accessibilityRole="button" disabled={busy} onPress={() => { confirmation.dispose(); otpRef.current = null; setConfirmation(null); setCode(''); setError(''); }}><Text style={ui.link}>Change mobile number</Text></Pressable>
         </> : <>
           <MemberField label="Mobile number" icon={Phone} value={phone} onChangeText={v => setPhone(normalizeMobile(v))} keyboardType="phone-pad" prefix="+91" maxLength={12} editable={!busy} autoComplete="tel" />
-          <Text style={ui.body}>We will send an SMS code to verify this number. By continuing, you agree to use this number for account verification. Google processes it to prevent abuse.</Text>
-          <ActionButton title="Send verification code" busy={busy} onPress={() => void send()} />
+          <Text style={ui.body}>{phoneOtpAvailable ? 'Use your own mobile number to verify your account. This preview generates a test code and does not send an SMS.' : phoneOtpUnavailableMessage}</Text>
+          <ActionButton title="Send verification code" busy={busy} disabled={!phoneOtpAvailable} onPress={() => void send()} />
           {!session.user && <Pressable accessibilityRole="button" onPress={() => { setLegacy(true); setError(''); }}><Text style={ui.link}>Use an existing email account</Text></Pressable>}
         </>}
         {!!error && <Text accessibilityRole="alert" style={ui.error}>{error}</Text>}
