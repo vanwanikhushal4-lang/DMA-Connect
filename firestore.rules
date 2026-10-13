@@ -1,52 +1,68 @@
-// presidents/{uid}: private registration profile. A president's chosen role is
-// descriptive only; it never grants access to another president's data.
-// presidents/{uid}/members/{mobile}: immutable member record, unique mobile per
-// president. Auth UID and document path enforce ownership.
+// accounts/{uid}: trusted uid/personId/role/level/committeeId/status metadata.
+// people/{id}: private name/email/mobile/residence/dob/socials/photoPaths,
+// birthday preferences, canonical identity and server-derived scope IDs.
+// committees/{id}: active catalogue and hierarchy without private contact data.
+// requests/{id}: applicantUid/personId/committeeId/status, one committee decision.
+// affiliations/{id}: personId/committeeId/status, independent committee membership.
+// workspaceEvents/{uid}: server timestamp for real-time invalidation.
+// phoneIndex/invitations/activity/birthdayDeliveries/system/access: server only.
+// Every client mutation is denied. Callable backend validators and transactions
+// enforce field validity, immutable identity, scoped appointments and transitions.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     function isAuthenticated() { return request.auth != null; }
     function isOwner(uid) { return isAuthenticated() && request.auth.uid == uid; }
-    function validString(value, min, max) { return value is string && value.size() >= min && value.size() <= max; }
-    function validEmail(value) { return validString(value, 3, 254) && value.matches('^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'); }
-    function isValidPresident(d, uid) {
-      return d.keys().hasAll(['uid','name','email','mobile','role','district','taluka','locality','cell','createdAt'])
-        && d.keys().hasOnly(['uid','name','email','mobile','role','district','taluka','locality','cell','createdAt'])
-        && d.uid == uid && validString(d.uid, 1, 128)
-        && validString(d.name, 1, 120) && validEmail(d.email) && d.email == request.auth.token.email
-        && validString(d.mobile, 10, 10) && d.mobile.matches('^[6-9][0-9]{9}$')
-        && d.role in ['district','taluka','city','ward','village','cell']
-        && validString(d.district, 1, 100) && validString(d.taluka, 0, 100)
-        && validString(d.locality, 0, 100) && validString(d.cell, 0, 100)
-        && (!(d.role in ['taluka','ward','village']) || d.taluka.size() > 0)
-        && (!(d.role in ['city','ward','village']) || d.locality.size() > 0)
-        && (d.role != 'cell' || d.cell.size() > 0)
-        && d.createdAt is timestamp && d.createdAt == request.time;
+    function ownsPerson(id) {
+      return isAuthenticated()
+        && exists(/databases/$(database)/documents/accounts/$(request.auth.uid))
+        && get(/databases/$(database)/documents/accounts/$(request.auth.uid)).data.personId == id;
     }
-    function isValidMember(d, uid, mobile) {
-      let profile = get(/databases/$(database)/documents/presidents/$(uid)).data;
-      return d.keys().hasAll(['name','email','mobile','residence','dob','taluka','ownerUid','createdAt'])
-        && d.keys().hasOnly(['name','email','mobile','residence','dob','taluka','ownerUid','createdAt'])
-        && d.ownerUid == uid && validString(d.ownerUid, 1, 128)
-        && validString(d.name, 1, 120)
-        && validString(d.email, 0, 254) && (d.email == '' || validEmail(d.email))
-        && validString(d.mobile, 10, 10) && d.mobile == mobile && d.mobile.matches('^[6-9][0-9]{9}$')
-        && validString(d.residence, 1, 500) && validString(d.taluka, 1, 100)
-        && (!(profile.role in ['taluka','ward','village']) || d.taluka == profile.taluka)
-        // Date-only values use UTC midnight. Allow the local day across time zones.
-        && d.dob is timestamp && d.dob >= timestamp.date(1900,1,1) && d.dob < request.time + duration.value(1, 'd')
-        && d.createdAt is timestamp && d.createdAt == request.time;
+    function uidUnchanged(d) { return isAuthenticated() && d.uid == request.auth.uid; }
+    function uidNotModified(d) { return d.uid == resource.data.uid; }
+    function validString(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function isValidAccount(d) {
+      return d.keys().hasAll(['uid','personId','role','status','committeeId'])
+        && validString(d.uid,1,128) && validString(d.personId,1,128)
+        && d.role in ['superadmin','president','member']
+        && d.status in ['active','suspended'];
     }
-    match /presidents/{uid} {
-      allow read: if isOwner(uid);
-      allow create: if isOwner(uid) && isValidPresident(request.resource.data, uid);
-      allow update, delete: if false;
-      match /members/{mobile} {
-        allow read: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid));
-        allow create: if isOwner(uid) && exists(/databases/$(database)/documents/presidents/$(uid)) && isValidMember(request.resource.data, uid, mobile);
-        allow update, delete: if false;
-      }
+    function isValidPerson(d) {
+      return d.keys().hasAll(['name','email','mobile','residence','dob','photoPaths','socials'])
+        && validString(d.name,1,120) && validString(d.email,3,254)
+        && validString(d.mobile,10,10) && validString(d.residence,1,500)
+        && validString(d.dob,10,10) && d.photoPaths is list && d.photoPaths.size() <= 3;
     }
+    function isValidRequest(d) { return validString(d.personId,1,128) && d.status in ['pending','approved','declined','withdrawn']; }
+    function isValidAffiliation(d) { return validString(d.personId,1,128) && d.status in ['active','left','suspended']; }
+    match /accounts/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+      allow create: if false && isValidAccount(request.resource.data) && uidUnchanged(request.resource.data);
+      allow update: if false && isValidAccount(request.resource.data) && uidNotModified(request.resource.data);
+      allow delete: if false;
+    }
+    match /people/{id} {
+      allow get: if ownsPerson(id);
+      allow list: if false;
+      allow create, update: if false && isValidPerson(request.resource.data);
+      allow delete: if false;
+    }
+    match /committees/{id} {
+      allow read: if isAuthenticated() && resource.data.active == true;
+      allow write: if false;
+    }
+    match /requests/{id} {
+      allow read: if isAuthenticated() && resource.data.applicantUid == request.auth.uid;
+      allow create, update: if false && isValidRequest(request.resource.data);
+      allow delete: if false;
+    }
+    match /affiliations/{id} {
+      allow read: if ownsPerson(resource.data.personId);
+      allow create, update: if false && isValidAffiliation(request.resource.data);
+      allow delete: if false;
+    }
+    match /workspaceEvents/{uid} { allow get: if isOwner(uid); allow list, write: if false; }
     match /{document=**} { allow read, write: if false; }
   }
 }

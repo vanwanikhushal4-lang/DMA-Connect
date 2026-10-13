@@ -27,7 +27,7 @@ export function AreaChart({ areas, compact = false }: { areas: { label: string; 
             strokeDasharray={`${Math.max(0, length - 3)} ${circumference - Math.max(0, length - 3)}`} transform={`rotate(${angle} 75 75)`} />;
         })}
       </Svg>
-      <View pointerEvents="none" style={styles.center}><Text style={styles.number}>{selection?.count ?? total}</Text><Text style={styles.centerLabel}>{selection ? 'in this taluka' : total === 1 ? 'member' : 'members'}</Text></View>
+      <View pointerEvents="none" style={styles.center}><Text style={styles.number}>{selection?.count ?? total}</Text><Text style={styles.centerLabel}>{selection ? 'in this area' : total === 1 ? 'member' : 'members'}</Text></View>
     </Animated.View>
     {top.length ? <View style={styles.legend}>{top.map((area, index) => <Pressable key={area.label} onPress={() => setSelected(previous => previous === area.label ? null : area.label)} accessibilityRole="button" accessibilityLabel={`${area.label}, ${area.count} ${area.count === 1 ? 'member' : 'members'}`} accessibilityState={{ selected: selected === area.label }} style={styles.legendRow}>
       <View style={[styles.dot, { backgroundColor: shades[index] }]} /><Text numberOfLines={1} style={styles.legendLabel}>{area.label}</Text><Text style={styles.legendValue}>{area.count}</Text>

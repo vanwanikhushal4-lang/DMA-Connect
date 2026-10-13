@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "536704319606",
+    "project_id": "dma-connect-foundation",
+    "storage_bucket": "dma-connect-foundation.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:536704319606:android:aec3ed2447aa26513e5f57",
+        "android_client_info": {
+          "package_name": "org.dmafoundation.connect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmWHe2oz_42k19QpuK1BPkU6wmQcRjKWU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

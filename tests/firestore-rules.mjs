@@ -2,95 +2,84 @@ import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { collection, deleteDoc, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, updateDoc } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, updateDoc, where } from 'firebase/firestore';
 
 let env;
 before(async () => {
   env = await initializeTestEnvironment({ projectId: 'demo-dma-connect', firestore: { host: '127.0.0.1', port: 8180, rules: await readFile('firestore.rules', 'utf8') } });
   await env.clearFirestore();
+  await env.withSecurityRulesDisabled(async context => {
+    const db = context.firestore();
+    for (const [path, data] of [
+      ['accounts/owner', { uid: 'owner', personId: 'canonical-person', role: 'member', status: 'active', committeeId: '' }],
+      ['accounts/president', { uid: 'president', personId: 'president-person', role: 'president', status: 'active', committeeId: 'area-vashi' }],
+      ['people/canonical-person', { personId: 'canonical-person', name: 'Member', photoPaths: ['private.jpg'] }],
+      ['people/president-person', { personId: 'president-person', name: 'President' }],
+      ['committees/area-vashi', { active: true, name: 'Vashi' }],
+      ['committees/area-inactive', { active: false, name: 'Inactive' }],
+      ['requests/own', { applicantUid: 'owner', personId: 'canonical-person', status: 'pending' }],
+      ['requests/other', { applicantUid: 'president', personId: 'president-person', status: 'pending' }],
+      ['affiliations/own', { personId: 'canonical-person', status: 'active' }],
+      ['affiliations/other', { personId: 'president-person', status: 'active' }],
+      ['workspaceEvents/owner', { revision: 1 }],
+      ['phoneIndex/private', { personId: 'canonical-person' }],
+      ['invitations/private', { phoneNumber: '+919000000001' }],
+      ['birthdayDeliveries/private', { email: 'private@example.com' }],
+      ['people/canonical-person/access/area-vashi', { active: true }],
+    ]) await setDoc(doc(db, path), data);
+  });
 });
 after(async () => { await env?.cleanup(); });
-const dbFor = uid => env.authenticatedContext(uid, { email: `${uid}@example.org` }).firestore();
-const profile = (uid, extra = {}) => ({ uid, name: 'Test President', email: `${uid}@example.org`, mobile: '9876543210', role: 'district', district: 'Mumbai', taluka: '', locality: '', cell: '', createdAt: serverTimestamp(), ...extra });
-const member = (uid, extra = {}) => ({ ownerUid: uid, name: 'Test Member', email: '', mobile: '9876543210', residence: 'Test residence', dob: Timestamp.fromDate(new Date('2000-01-01T00:00:00Z')), taluka: 'Thane', createdAt: serverTimestamp(), ...extra });
-const parent = (db, uid) => doc(db, 'presidents', uid);
-const child = (db, uid, mobile = '9876543210') => doc(db, 'presidents', uid, 'members', mobile);
+const dbFor = uid => uid ? env.authenticatedContext(uid).firestore() : env.unauthenticatedContext().firestore();
 
-test('owner can create and read their profile, while strangers cannot', async () => {
-  const uid = 'owner'; const db = dbFor(uid);
-  await assertSucceeds(setDoc(parent(db, uid), profile(uid)));
-  await assertSucceeds(getDoc(parent(db, uid)));
-  await assertFails(getDoc(parent(dbFor('stranger'), uid)));
-  await assertFails(getDoc(parent(env.unauthenticatedContext().firestore(), uid)));
-  await assertFails(getDocs(collection(db, 'presidents')));
+test('only the account owner can read account metadata, including a missing onboarding account', async () => {
+  await assertSucceeds(getDoc(doc(dbFor('owner'), 'accounts', 'owner')));
+  await assertSucceeds(getDoc(doc(dbFor('new-user'), 'accounts', 'new-user')));
+  await assertFails(getDoc(doc(dbFor('president'), 'accounts', 'owner')));
+  await assertFails(getDoc(doc(dbFor(), 'accounts', 'owner')));
+  await assertFails(getDocs(collection(dbFor('owner'), 'accounts')));
 });
-test('unauthenticated and cross-account profile creation is denied', async () => {
-  await assertFails(setDoc(parent(env.unauthenticatedContext().firestore(), 'anonymous'), profile('anonymous')));
-  await assertFails(setDoc(parent(dbFor('attacker'), 'victim'), profile('victim')));
+test('profile ownership uses the trusted canonical person ID rather than the auth UID', async () => {
+  assert.equal((await assertSucceeds(getDoc(doc(dbFor('owner'), 'people', 'canonical-person')))).data().name, 'Member');
+  await assertFails(getDoc(doc(dbFor('owner'), 'people', 'president-person')));
+  await assertFails(getDoc(doc(dbFor('canonical-person'), 'people', 'canonical-person')));
+  await assertFails(getDoc(doc(dbFor('president'), 'people', 'canonical-person')));
+  await assertFails(getDocs(collection(dbFor('owner'), 'people')));
 });
-test('roles never confer administrator privileges or allow unknown schema fields', async () => {
-  for (const extra of [{ role: 'admin' }, { admin: true }, { uid: 'victim' }, { email: 'victim@example.org' }, { name: 123 }, { name: '' }, { name: 'x'.repeat(121) }, { mobile: '123' }, { createdAt: Timestamp.fromMillis(0) }]) {
-    await assertFails(setDoc(parent(dbFor('invalid'), 'invalid'), profile('invalid', extra)));
-  }
-});
-test('role-specific areas are required', async () => {
-  for (const role of ['taluka', 'ward', 'village', 'city', 'cell']) {
-    const uid = `area-${role}`; const db = dbFor(uid);
-    await assertFails(setDoc(parent(db, uid), profile(uid, { role })));
-    await assertSucceeds(setDoc(parent(db, uid), profile(uid, { role, taluka: 'Thane', locality: 'Test area', cell: 'OBC' })));
-  }
-});
-test('profiles cannot be modified or deleted by clients', async () => {
+test('every client account/profile mutation is denied even with valid-looking or oversized data', async () => {
   const db = dbFor('owner');
-  await assertFails(updateDoc(parent(db, 'owner'), { role: 'district', admin: true }));
-  await assertFails(deleteDoc(parent(db, 'owner')));
+  await assertFails(setDoc(doc(db, 'accounts', 'owner'), { uid: 'owner', personId: 'canonical-person', role: 'superadmin', status: 'active', committeeId: 'dma-district' }));
+  await assertFails(updateDoc(doc(db, 'people', 'canonical-person'), { activeScopeIds: ['dma-district'], name: 'x'.repeat(100000) }));
+  await assertFails(deleteDoc(doc(db, 'people', 'canonical-person')));
+  await assertFails(setDoc(doc(db, 'people', 'stolen'), { name: 'Stolen', accountUid: 'owner' }));
 });
-test('owner can create, read and query members ordered by registration date', async () => {
-  const db = dbFor('owner');
-  await assertSucceeds(setDoc(child(db, 'owner'), member('owner')));
-  await assertSucceeds(getDoc(child(db, 'owner')));
-  const snapshot = await assertSucceeds(getDocs(query(collection(db, 'presidents', 'owner', 'members'), orderBy('createdAt', 'desc'))));
-  assert.equal(snapshot.size, 1);
+test('active catalogue queries are allowed only after authentication and inactive records are private', async () => {
+  assert.equal((await assertSucceeds(getDocs(query(collection(dbFor('owner'), 'committees'), where('active', '==', true))))).size, 1);
+  await assertFails(getDocs(collection(dbFor('owner'), 'committees')));
+  await assertFails(getDoc(doc(dbFor('owner'), 'committees', 'area-inactive')));
+  await assertFails(getDoc(doc(dbFor(), 'committees', 'area-vashi')));
+  await assertFails(updateDoc(doc(dbFor('owner'), 'committees', 'area-vashi'), { presidentUid: 'owner' }));
 });
-test('members are private even when another account chooses district president', async () => {
-  const db = dbFor('district-attacker');
-  await assertSucceeds(setDoc(parent(db, 'district-attacker'), profile('district-attacker')));
-  await assertFails(getDoc(child(db, 'owner')));
-  await assertFails(getDocs(collection(db, 'presidents', 'owner', 'members')));
-  await assertFails(setDoc(child(db, 'owner', '9876543211'), member('owner', { mobile: '9876543211' })));
+test('request queries must be scoped to the authenticated applicant', async () => {
+  assert.equal((await assertSucceeds(getDocs(query(collection(dbFor('owner'), 'requests'), where('applicantUid', '==', 'owner'))))).size, 1);
+  await assertFails(getDocs(query(collection(dbFor('owner'), 'requests'), where('applicantUid', '==', 'president'))));
+  await assertFails(getDoc(doc(dbFor('president'), 'requests', 'own')));
+  await assertFails(updateDoc(doc(dbFor('owner'), 'requests', 'own'), { status: 'approved' }));
 });
-test('member writes require an existing president profile', async () => {
-  await assertFails(setDoc(child(dbFor('orphan'), 'orphan'), member('orphan')));
+test('affiliation queries must match the canonical person owned by the session', async () => {
+  assert.equal((await assertSucceeds(getDocs(query(collection(dbFor('owner'), 'affiliations'), where('personId', '==', 'canonical-person'))))).size, 1);
+  await assertFails(getDocs(collection(dbFor('owner'), 'affiliations')));
+  await assertFails(getDoc(doc(dbFor('owner'), 'affiliations', 'other')));
+  await assertFails(updateDoc(doc(dbFor('owner'), 'affiliations', 'own'), { status: 'active', committeeId: 'cell-obc' }));
 });
-test('malformed member data and ownership tampering are denied', async () => {
-  const uid = 'member-validation'; const db = dbFor(uid);
-  await assertSucceeds(setDoc(parent(db, uid), profile(uid)));
-  for (const extra of [{ ownerUid: 'victim' }, { name: 7 }, { email: 'not-an-email' }, { mobile: '9876543211' }, { residence: '' }, { residence: 'x'.repeat(501) }, { taluka: '' }, { isAdmin: true }, { dob: '01/01/2000' }, { dob: Timestamp.fromDate(new Date('1899-12-31')) }, { dob: Timestamp.fromMillis(Date.now() + 172800000) }, { createdAt: Timestamp.fromMillis(0) }]) {
-    await assertFails(setDoc(child(db, uid), member(uid, extra)));
+test('workspace invalidation is private and cannot be written by clients', async () => {
+  await assertSucceeds(getDoc(doc(dbFor('owner'), 'workspaceEvents', 'owner')));
+  await assertFails(getDoc(doc(dbFor('president'), 'workspaceEvents', 'owner')));
+  await assertFails(setDoc(doc(dbFor('owner'), 'workspaceEvents', 'owner'), { revision: 100 }));
+});
+test('identity indexes, invitations, activity, deliveries, access grants and legacy data are server only', async () => {
+  for (const path of ['phoneIndex/private', 'invitations/private', 'activity/private', 'birthdayDeliveries/private', 'system/birthday-service', 'people/canonical-person/access/area-vashi', 'presidents/owner', 'presidents/owner/members/9000000001']) {
+    await assertFails(getDoc(doc(dbFor('owner'), path)));
+    await assertFails(setDoc(doc(dbFor('owner'), path), { active: true, role: 'superadmin' }));
   }
-});
-test('DOB supports today across time zones', async () => {
-  const uid = 'today'; const db = dbFor(uid);
-  await assertSucceeds(setDoc(parent(db, uid), profile(uid)));
-  const now = new Date();
-  const nextUtcMidnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  await assertSucceeds(setDoc(child(db, uid), member(uid, { dob: Timestamp.fromDate(nextUtcMidnight) })));
-});
-test('duplicate records cannot overwrite existing members, and client deletes are denied', async () => {
-  const db = dbFor('owner');
-  await assertFails(setDoc(child(db, 'owner'), member('owner')));
-  await assertFails(updateDoc(child(db, 'owner'), { ownerUid: 'victim', mobile: '9876543211' }));
-  await assertFails(deleteDoc(child(db, 'owner')));
-});
-test('assigned taluka is enforced for ward, taluka and village presidents', async () => {
-  for (const role of ['ward', 'taluka', 'village']) {
-    const uid = `area-${role}`; const db = dbFor(uid);
-    await assertFails(setDoc(child(db, uid), member(uid, { taluka: 'Another taluka' })));
-    await assertSucceeds(setDoc(child(db, uid), member(uid)));
-  }
-});
-test('unmodelled collections deny all access', async () => {
-  const db = dbFor('owner');
-  await assertFails(setDoc(doc(db, 'admins', 'owner'), { admin: true }));
-  await assertFails(getDoc(doc(db, 'admins', 'owner')));
 });

@@ -1,0 +1,7 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Photos are served only through an authenticated, scope-checked callable.
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}
