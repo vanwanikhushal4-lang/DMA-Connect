@@ -10,12 +10,12 @@ export function AreaChart({ areas, compact = false }: { areas: { label: string; 
   const entrance = useEntrance(100);
   const [selected, setSelected] = useState<string | null>(null);
   const top = areas.slice(0, 4);
-  if (areas.length > 4) top.push({ label: 'Other talukas', count: areas.slice(4).reduce((sum, area) => sum + area.count, 0) });
+  if (areas.length > 4) top.push({ label: 'Other areas', count: areas.slice(4).reduce((sum, area) => sum + area.count, 0) });
   const total = areas.reduce((sum, area) => sum + area.count, 0);
   const selection = top.find(area => area.label === selected);
   const circumference = 2 * Math.PI * 51;
   return <View style={[styles.card, !compact && { flex: 0.7 }]}>
-    <View style={styles.heading}><View><Text style={styles.title}>Members by taluka</Text><Text style={styles.subtitle}>Where your members belong</Text></View><MapPin size={18} color="#897599" strokeWidth={1.6} /></View>
+    <View style={styles.heading}><View><Text style={styles.title}>Members by home area</Text><Text style={styles.subtitle}>Where your members live</Text></View><MapPin size={18} color="#897599" strokeWidth={1.6} /></View>
     <Animated.View style={[styles.ring, entrance]}>
       <Svg width={150} height={150} viewBox="0 0 150 150">
         <Circle cx={75} cy={75} r={51} fill="none" stroke="#F0EBF6" strokeWidth={17} />
@@ -31,7 +31,7 @@ export function AreaChart({ areas, compact = false }: { areas: { label: string; 
     </Animated.View>
     {top.length ? <View style={styles.legend}>{top.map((area, index) => <Pressable key={area.label} onPress={() => setSelected(previous => previous === area.label ? null : area.label)} accessibilityRole="button" accessibilityLabel={`${area.label}, ${area.count} ${area.count === 1 ? 'member' : 'members'}`} accessibilityState={{ selected: selected === area.label }} style={styles.legendRow}>
       <View style={[styles.dot, { backgroundColor: shades[index] }]} /><Text numberOfLines={1} style={styles.legendLabel}>{area.label}</Text><Text style={styles.legendValue}>{area.count}</Text>
-    </Pressable>)}</View> : <Text style={styles.empty}>No taluka data for this period yet.</Text>}
+    </Pressable>)}</View> : <Text style={styles.empty}>No home area data available yet.</Text>}
   </View>;
 }
 const styles = StyleSheet.create({
