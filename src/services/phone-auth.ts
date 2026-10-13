@@ -2,7 +2,8 @@ import { linkWithPhoneNumber, RecaptchaVerifier, signInWithPhoneNumber, signOut 
 import { auth } from './auth-client';
 import { usingEmulators } from './firebase';
 import { requirePhoneOtp } from './otp-config';
-export type OtpConfirmation = { confirm: (code: string) => Promise<void>; dispose: () => void };
+import { getEmulatorOtp } from './emulator-otp';
+export type OtpConfirmation = { confirm: (code: string) => Promise<void>; dispose: () => void; testCode?: string };
 export async function beginPhoneOtp(phoneNumber: string, linking = false, _onAutomaticError?: (error: unknown) => void): Promise<OtpConfirmation> {
   requirePhoneOtp();
   if (typeof document === 'undefined') throw new Error('Phone verification is available in the mobile app or a browser.');
@@ -14,7 +15,7 @@ export async function beginPhoneOtp(phoneNumber: string, linking = false, _onAut
   const dispose = () => { if (disposed) return; disposed = true; verifier.clear(); container.remove(); };
   try {
     const confirmation = linking && auth.currentUser ? await linkWithPhoneNumber(auth.currentUser, phoneNumber, verifier) : await signInWithPhoneNumber(auth, phoneNumber, verifier);
-    return { confirm: async code => { await confirmation.confirm(code); }, dispose };
+    return { confirm: async code => { await confirmation.confirm(code); }, dispose, testCode: await getEmulatorOtp(phoneNumber, confirmation.verificationId) };
   } catch (error) { dispose(); throw error; }
 }
 export async function signOutPhone() { await signOut(auth); }

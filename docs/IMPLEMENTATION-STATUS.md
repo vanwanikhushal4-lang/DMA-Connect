@@ -19,6 +19,7 @@ Confirmed district hierarchy; scoped account invitations and appointments; own-p
 - Browser: simulated OTP sign-in, mobile-width Super Admin lookup/appointment controls and member search verified.
 - Birthday content and retry behavior: captured by a test mailer; no real email sent.
 - Deferred OTP change on 13 October: lint/typecheck and the production web export passed. A browser check confirmed live OTP is disabled even when the emulator flag is present in the production export; the development preview still completed simulated OTP and opened the profile form without console errors.
+- Test-login usability on 13 October: verification now shows the exact session's generated Test OTP in emulator mode. Browser checks confirmed incorrect-code rejection, a fresh displayed code on resend and successful verification into profile completion. Production still hides test codes and disables live OTP. The iOS secondary Firebase app's missing `databaseURL` option was corrected after the simulator exposed RNFirebase's required-string validation; native interactive verification still needs a smoke test.
 
 ## Live activation still required
 

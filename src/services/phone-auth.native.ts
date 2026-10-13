@@ -7,13 +7,16 @@ import { api } from './api';
 import { emulatorHost, usingEmulators } from './firebase';
 import { firebaseConfig } from './firebase-config';
 import { requirePhoneOtp } from './otp-config';
+import { getEmulatorOtp } from './emulator-otp';
 import type { OtpConfirmation } from './phone-auth';
 
 async function nativeAuth() {
   if (!usingEmulators) return getAuth();
   let app;
   try { app = getApp('dma-otp-emulator'); }
-  catch { app = await initializeApp({ ...firebaseConfig, appId: Platform.OS === 'ios' ? '1:536704319606:ios:b8359d5b5fa2f41e3e5f57' : '1:536704319606:android:aec3ed2447aa26513e5f57', projectId: 'demo-dma-connect' }, { name: 'dma-otp-emulator' }); }
+  // RNFirebase requires a databaseURL string for secondary apps, even when
+  // Realtime Database is unused. An empty value keeps it unconfigured.
+  catch { app = await initializeApp({ ...firebaseConfig, appId: Platform.OS === 'ios' ? '1:536704319606:ios:b8359d5b5fa2f41e3e5f57' : '1:536704319606:android:aec3ed2447aa26513e5f57', projectId: 'demo-dma-connect', databaseURL: '' }, { name: 'dma-otp-emulator' }); }
   const instance = getAuth(app);
   if (!instance.emulatorConfig) connectAuthEmulator(instance, `http://${emulatorHost}:9099`);
   instance.settings.appVerificationDisabledForTesting = true;
@@ -32,7 +35,7 @@ export async function beginPhoneOtp(phoneNumber: string, linking = false, onAuto
     const { token } = await api<{ token: string }>('createNativeSessionToken');
     const result = await signInNativeToken(instance, token);
     const verificationId = await new PhoneAuthProvider(instance).verifyPhoneNumber(phoneNumber, undefined as never);
-    return { confirm: async code => { await linkWithCredential(result.user, PhoneAuthProvider.credential(verificationId, code)); await bridge(); }, dispose: () => {} };
+    return { confirm: async code => { await linkWithCredential(result.user, PhoneAuthProvider.credential(verificationId, code)); await bridge(); }, dispose: () => {}, testCode: await getEmulatorOtp(phoneNumber, verificationId) };
   }
   const confirmation = await signInWithPhoneNumber(instance, phoneNumber);
   let bridgePromise: Promise<void> | undefined;
@@ -45,7 +48,7 @@ export async function beginPhoneOtp(phoneNumber: string, linking = false, onAuto
   return { confirm: async code => {
     if (instance.currentUser?.phoneNumber !== phoneNumber) await confirmation.confirm(code);
     await finish();
-  }, dispose: stop };
+  }, dispose: stop, testCode: await getEmulatorOtp(phoneNumber, confirmation.verificationId) };
 }
 export async function signOutPhone() {
   await signOut(auth);

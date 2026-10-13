@@ -1,7 +1,7 @@
 export function friendlyFirebaseError(error: unknown) {
   const code = (error as { code?: string })?.code;
   switch (code) {
-    case 'auth/invalid-verification-code': return 'That verification code is incorrect. Check the SMS and try again.';
+    case 'auth/invalid-verification-code': return 'That verification code is incorrect. Check the code and try again.';
     case 'auth/code-expired': case 'auth/session-expired': return 'This code has expired. Request a new verification code.';
     case 'auth/invalid-phone-number': return 'Enter a valid mobile number with its country code.';
     case 'auth/billing-not-enabled': case 'auth/operation-not-allowed': return 'Phone verification has not been activated yet. Contact the foundation administrator.';

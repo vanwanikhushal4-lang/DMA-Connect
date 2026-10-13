@@ -81,7 +81,9 @@ EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true npm run web -- --port 8093
 EXPO_PUBLIC_USE_FIREBASE_EMULATORS=true npm run ios -- --port 8093
 ```
 
-SMS codes are printed by the Auth emulator; they are not delivered to a handset. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` to the development computer's LAN IP for a physical phone, or `10.0.2.2` for the standard Android emulator. Restarting Metro without the flag selects live data services, but live phone signup stays unavailable until Twilio is integrated. Existing email sign-in remains available.
+To log in locally, enter a 10-digit Indian mobile and tap **Send verification code**. The next screen shows **Test OTP**: enter that six-digit code and tap **Verify and continue**. Use `9000000001` for the seeded demo Super Admin, or a different test number to create a member account. Complete the profile on first signup.
+
+The Auth emulator generates a new code for each request; it does not deliver SMS. The app displays only the code matching the requested phone and verification session, in development emulator mode. Codes are also printed in the emulator log. Set `EXPO_PUBLIC_FIREBASE_EMULATOR_HOST` to the development computer's LAN IP for a physical phone, or `10.0.2.2` for the standard Android emulator. Restarting Metro without the flag selects live data services, but live phone signup stays unavailable until Twilio is integrated. Existing email sign-in remains available.
 
 ```sh
 npm run lint

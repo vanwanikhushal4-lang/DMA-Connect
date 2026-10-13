@@ -13,7 +13,7 @@ import { Screen, ui } from '../components/Screen';
 import { PersonForm } from '../components/PersonForm';
 import { ActionButton } from '../components/ActionButton';
 import { MemberField } from '../components/MemberField';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { usingEmulators } from '../services/firebase';
 import { phoneOtpAvailable, phoneOtpUnavailableMessage } from '../services/otp-config';
 
@@ -32,7 +32,7 @@ export function AccountScreen() {
     catch (e) { setError(friendlyFirebaseError(e)); } finally { setBusy(false); }
   }
   async function confirm() {
-    if (!confirmation || !/^\d{6}$/.test(code)) { setError('Enter the 6-digit code sent to your phone.'); return; }
+    if (!confirmation || !/^\d{6}$/.test(code)) { setError(usingEmulators ? 'Enter the 6-digit test code shown on this screen.' : 'Enter the 6-digit code sent to your phone.'); return; }
     setBusy(true); setError('');
     try { await confirmation.confirm(code); confirmation.dispose(); otpRef.current = null; setConfirmation(null); }
     catch (e) { setError(friendlyFirebaseError(e)); } finally { setBusy(false); }
@@ -54,13 +54,17 @@ export function AccountScreen() {
           <Pressable accessibilityRole="button" onPress={() => { setBusy(true); void session.resetPassword(email).then(() => setError('A password reset email has been sent.')).catch(e => setError(friendlyFirebaseError(e))).finally(() => setBusy(false)); }}><Text style={ui.link}>Reset password</Text></Pressable>
           <Pressable accessibilityRole="button" onPress={() => { setLegacy(false); setError(''); }}><Text style={ui.link}>Use phone OTP instead</Text></Pressable>
         </> : confirmation ? <>
+          {usingEmulators && <View style={{ padding: 16, gap: 6, borderRadius: 11, backgroundColor: colors.lavender }}>
+            <Text style={ui.heading}>Test OTP</Text>
+            {confirmation.testCode ? <><Text selectable accessibilityLabel={'Test verification code ' + confirmation.testCode} style={{ fontFamily: fonts.bold, fontSize: 28, letterSpacing: 4, color: colors.purple }}>{confirmation.testCode}</Text><Text style={ui.body}>Enter this code below. No SMS was sent.</Text></> : <Text style={ui.body}>The test code couldn’t be loaded. Request a new code or check the local emulator log.</Text>}
+          </View>}
           <MemberField label="Verification code" icon={KeyRound} value={code} onChangeText={v => setCode(v.replace(/\D/g, '').slice(0, 6))} keyboardType="number-pad" textContentType="oneTimeCode" autoComplete="one-time-code" maxLength={6} editable={!busy} onSubmitEditing={() => void confirm()} />
           <ActionButton title="Verify and continue" busy={busy} onPress={() => void confirm()} />
           <ActionButton title={cooldown ? 'Resend code in ' + cooldown + 's' : 'Resend code'} secondary disabled={busy || cooldown > 0} onPress={() => void send()} />
           <Pressable accessibilityRole="button" disabled={busy} onPress={() => { confirmation.dispose(); otpRef.current = null; setConfirmation(null); setCode(''); setError(''); }}><Text style={ui.link}>Change mobile number</Text></Pressable>
         </> : <>
           <MemberField label="Mobile number" icon={Phone} value={phone} onChangeText={v => setPhone(normalizeMobile(v))} keyboardType="phone-pad" prefix="+91" maxLength={12} editable={!busy} autoComplete="tel" />
-          <Text style={ui.body}>{phoneOtpAvailable ? 'Use your own mobile number to verify your account. This preview generates a test code and does not send an SMS.' : phoneOtpUnavailableMessage}</Text>
+          <Text style={ui.body}>{phoneOtpAvailable ? 'This preview does not send SMS. Tap Send verification code and the test OTP will appear on the next screen.' : phoneOtpUnavailableMessage}</Text>
           <ActionButton title="Send verification code" busy={busy} disabled={!phoneOtpAvailable} onPress={() => void send()} />
           {!session.user && <Pressable accessibilityRole="button" onPress={() => { setLegacy(true); setError(''); }}><Text style={ui.link}>Use an existing email account</Text></Pressable>}
         </>}
