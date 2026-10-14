@@ -82,7 +82,7 @@ npx eas-cli@latest build --platform ios --profile development-simulator
 npx eas-cli@latest build --platform android --profile development
 ```
 
-A development build is required for the current native emulator module. Do not enable app-verification bypasses in production. Emulators are opt-in, development-only, use `demo-dma-connect`, and do not send SMS or email. Both phone-auth entry points reject live OTP requests until Twilio is integrated.
+Expo Go supports test OTP through the local Auth emulator REST interface and Firebase JS SDK; native Firebase verification still requires a development build. Do not enable app-verification bypasses in production. Emulators are opt-in, development-only, use `demo-dma-connect`, and do not send SMS or email. All phone-auth entry points reject live OTP requests until Twilio is integrated. Use `npm run emulators` and `npm run start:demo` for local previews.
 
 ## Legacy records
 

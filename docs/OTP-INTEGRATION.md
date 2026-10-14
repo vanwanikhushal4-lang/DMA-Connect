@@ -4,7 +4,7 @@
 
 On 13 October 2026, the owner chose **Twilio for live SMS OTP later** and asked that development continue without waiting for Firebase billing. Twilio is not integrated or activated yet. Do not create an account, purchase SMS, enable Firebase SMS or collect provider credentials as part of the current development step.
 
-Local signup continues to use Firebase Auth emulators. `usingEmulators` requires both a development build and the explicit emulator flag. `src/services/otp-config.ts` blocks OTP requests outside that mode, and both web and native phone-auth services check it before calling an SMS provider. An existing email account can still sign in to live Firebase.
+Local signup continues to use Firebase Auth emulators. `usingEmulators` requires a development JavaScript bundle (`__DEV__`) and the emulator flag, enabled by the checked-in `.env.development`. `npm start` / `npm run start:demo` check the local services and set the LAN host. Direct Expo commands also enable test mode, with native devices using Metro's host address. `npm run start:live` opts out for live email testing. The emulator generates a fresh code for each session and the app displays it; there is no fixed code. Expo Go uses the emulator REST interface with JS SDK credential verification, while builds containing React Native Firebase retain their native flow. `src/services/otp-config.ts` blocks OTP requests outside emulator mode, and the Expo Go fallback also requires the connected Auth emulator and the demo project.
 
 ## Later integration
 

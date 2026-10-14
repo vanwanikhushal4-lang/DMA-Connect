@@ -19,9 +19,11 @@
   },
   "emulators": {
     "auth": {
+      "host": "0.0.0.0",
       "port": 9099
     },
     "firestore": {
+      "host": "0.0.0.0",
       "port": 8180,
       "edition": "enterprise"
     },
@@ -30,9 +32,11 @@
     },
     "singleProjectMode": true,
     "functions": {
+      "host": "0.0.0.0",
       "port": 5001
     },
     "storage": {
+      "host": "0.0.0.0",
       "port": 9199
     }
   },

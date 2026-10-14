@@ -62,7 +62,8 @@
           "microphonePermission": false
         }
       ],
-      "./plugins/with-ios-path-support.cjs"
+      "./plugins/with-ios-path-support.cjs",
+      "expo-sharing"
     ]
   }
 }

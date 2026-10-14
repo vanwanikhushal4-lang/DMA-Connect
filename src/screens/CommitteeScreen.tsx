@@ -7,6 +7,7 @@ import { api } from '../services/api';
 import { Screen, ui } from '../components/Screen';
 import { SelectField } from '../components/SelectField';
 import { ActionButton } from '../components/ActionButton';
+import { LetterheadCard } from '../components/LetterheadCard';
 
 export function CommitteeScreen() {
   const { committees, myRequests, affiliations, catalogueError } = useCommunity(), { profile } = useSession();
@@ -37,5 +38,6 @@ export function CommitteeScreen() {
     <View style={ui.card}><Text style={ui.heading}>My requests</Text>{!myRequests.length && <Text style={ui.body}>You have not submitted a committee request yet.</Text>}
       {[...myRequests].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(r => <View key={r.id} style={{ gap: 9 }}><Text style={ui.heading}>{r.committeeName}</Text><View style={ui.pill}><Text style={ui.pillText}>{r.status[0].toUpperCase() + r.status.slice(1)}</Text></View>{!!r.reason && <Text style={ui.body}>{r.reason}</Text>}{r.status === 'pending' && <ActionButton title="Withdraw request" secondary disabled={!!busy} busy={busy === r.id} onPress={() => void act('decideRequest', { requestId: r.id, decision: 'withdrawn' }, r.id, 'Your pending request has been withdrawn.')} />}</View>)}
     </View>
+    <LetterheadCard />
   </Screen>;
 }
