@@ -16,12 +16,16 @@ import { MemberField } from '../components/MemberField';
 import { colors, fonts } from '../theme';
 import { usingEmulators } from '../services/firebase';
 import { phoneOtpAvailable, phoneOtpUnavailableMessage } from '../services/otp-config';
+import { backendApiEnabled } from '../services/backend-api';
+import { useBackendAuth } from '../context/BackendAuthContext';
+import { BackendSignupScreen } from './BackendSignupScreen';
 
 export function AccountScreen() {
   const session = useSession();
+  const backend = useBackendAuth();
   const [phone, setPhone] = useState(''), [code, setCode] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [confirmation, setConfirmation] = useState<OtpConfirmation | null>(null), [sentAt, setSentAt] = useState(0), [now, setNow] = useState(() => Date.now());
-  const [legacy, setLegacy] = useState(false), [email, setEmail] = useState(''), [password, setPassword] = useState('');
+  const [legacy, setLegacy] = useState(backendApiEnabled), [email, setEmail] = useState(''), [password, setPassword] = useState('');
   const otpRef = useRef<OtpConfirmation | null>(null);
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => { clearInterval(t); otpRef.current?.dispose(); }; }, []);
   async function send() {
@@ -38,21 +42,26 @@ export function AccountScreen() {
     catch (e) { setError(friendlyFirebaseError(e)); } finally { setBusy(false); }
   }
   const cooldown = Math.max(0, 60 - Math.floor((now - sentAt) / 1000));
-  if (session.loading) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}><View style={{ padding: 22 }}><Brand /></View><View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}><ActivityIndicator color={colors.purple} /><Text style={ui.body}>Loading your account…</Text></View></SafeAreaView>;
-  if (session.user?.phoneNumber && !session.error && !session.profile?.photoPaths.length) return <CompleteAccount />;
+  if (backendApiEnabled ? backend.loading : session.loading) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}><View style={{ padding: 22 }}><Brand /></View><View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16 }}><ActivityIndicator color={colors.purple} /><Text style={ui.body}>Loading your account…</Text></View></SafeAreaView>;
+  if (backendApiEnabled && !legacy) return <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}><View style={{ padding: 22 }}><Brand /></View><BackendSignupScreen onSignIn={() => { setLegacy(true); setPassword(''); setError(''); }} /></SafeAreaView>;
+  if (!backendApiEnabled && session.user?.phoneNumber && !session.error && !session.profile?.photoPaths.length) return <CompleteAccount />;
   return <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }}>
     <View style={{ paddingHorizontal: 22, paddingVertical: 15, alignSelf: 'center', width: '100%', maxWidth: 780 }}><Brand /></View>
-    {usingEmulators && <View style={{ paddingHorizontal: 22 }}><Text style={ui.body}>Test mode · SMS codes are simulated</Text></View>}
-    <Screen title={confirmation ? 'Verify your mobile' : session.user ? 'Verify your phone number' : 'Welcome to DMA Connect'} description={confirmation ? (usingEmulators ? 'Enter the test code for +91 ' : 'Enter the code sent to +91 ') + phone : 'Sign in or create your member account using your own mobile number.'}>
-      {!!session.error && <View style={ui.card}><Text style={ui.error}>{session.error}</Text><ActionButton title="Retry loading account" secondary onPress={session.retry} /><ActionButton title="Sign out" secondary onPress={() => void session.signOut()} /></View>}
+    {usingEmulators && !legacy && <View style={{ paddingHorizontal: 22 }}><Text style={ui.body}>Test mode · SMS codes are simulated</Text></View>}
+    <Screen title={confirmation ? 'Verify your mobile' : legacy ? 'Welcome to DMA Connect' : session.user ? 'Verify your phone number' : 'Welcome to DMA Connect'} description={confirmation ? (usingEmulators ? 'Enter the test code for +91 ' : 'Enter the code sent to +91 ') + phone : legacy && backendApiEnabled ? 'Sign in with your email and password, or create a member account.' : 'Sign in or create your member account using your own mobile number.'}>
+      {!backendApiEnabled && !!session.error && <View style={ui.card}><Text style={ui.error}>{session.error}</Text><ActionButton title="Retry loading account" secondary onPress={session.retry} /><ActionButton title="Sign out" secondary onPress={() => void session.signOut()} /></View>}
       <View style={ui.card}>
-        {legacy && !session.user ? <>
-          <Text style={ui.heading}>Existing email account</Text>
+        {legacy && (backendApiEnabled || !session.user) ? <>
+          <Text style={ui.heading}>{backendApiEnabled ? 'Email sign in' : 'Existing email account'}</Text>
           <MemberField label="Email" icon={Mail} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
           <MemberField label="Password" icon={KeyRound} value={password} onChangeText={setPassword} secureTextEntry />
-          <ActionButton title="Sign in" busy={busy} onPress={() => { setBusy(true); setError(''); void session.signIn(email, password).catch(e => setError(friendlyFirebaseError(e))).finally(() => setBusy(false)); }} />
-          <Pressable accessibilityRole="button" onPress={() => { setBusy(true); void session.resetPassword(email).then(() => setError('A password reset email has been sent.')).catch(e => setError(friendlyFirebaseError(e))).finally(() => setBusy(false)); }}><Text style={ui.link}>Reset password</Text></Pressable>
-          <Pressable accessibilityRole="button" onPress={() => { setLegacy(false); setError(''); }}><Text style={ui.link}>Use phone OTP instead</Text></Pressable>
+          <ActionButton title="Sign in" busy={busy} onPress={() => {
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || !password) { setError('Enter your email address and password.'); return; }
+            setBusy(true); setError('');
+            void (backendApiEnabled ? backend.signIn(email, password) : session.signIn(email, password)).then(() => setPassword('')).catch(e => setError(friendlyFirebaseError(e))).finally(() => setBusy(false));
+          }} />
+          {!backendApiEnabled && <Pressable accessibilityRole="button" onPress={() => { setBusy(true); void session.resetPassword(email).then(() => setError('A password reset email has been sent.')).catch(e => setError(friendlyFirebaseError(e))).finally(() => setBusy(false)); }}><Text style={ui.link}>Reset password</Text></Pressable>}
+          <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setLegacy(false); setError(''); setPassword(''); }}><Text style={ui.link}>{backendApiEnabled ? 'Create an account' : 'Use phone OTP instead'}</Text></Pressable>
         </> : confirmation ? <>
           {usingEmulators && <View style={{ padding: 16, gap: 6, borderRadius: 11, backgroundColor: colors.lavender }}>
             <Text style={ui.heading}>Test OTP</Text>
@@ -66,12 +75,12 @@ export function AccountScreen() {
           <MemberField label="Mobile number" icon={Phone} value={phone} onChangeText={v => setPhone(normalizeMobile(v))} keyboardType="phone-pad" prefix="+91" maxLength={12} editable={!busy} autoComplete="tel" />
           <Text style={ui.body}>{phoneOtpAvailable ? 'This preview does not send SMS. Tap Send verification code and the test OTP will appear on the next screen.' : phoneOtpUnavailableMessage}</Text>
           <ActionButton title="Send verification code" busy={busy} disabled={!phoneOtpAvailable} onPress={() => void send()} />
-          {!session.user && <Pressable accessibilityRole="button" onPress={() => { setLegacy(true); setError(''); }}><Text style={ui.link}>Use an existing email account</Text></Pressable>}
+          {(backendApiEnabled || !session.user) && <Pressable accessibilityRole="button" onPress={() => { setLegacy(true); setError(''); }}><Text style={ui.link}>Use an existing email account</Text></Pressable>}
         </>}
         {!!error && <Text accessibilityRole="alert" style={ui.error}>{error}</Text>}
       </View>
-      <Text style={ui.body}>Presidents, makers and checkers use the mobile number assigned in their approved invitation. All other new accounts start as members.</Text>
-      {session.user && <ActionButton title="Sign out" secondary onPress={() => void session.signOut()} />}
+      {!legacy && <Text style={ui.body}>Presidents, makers and checkers use the mobile number assigned in their approved invitation. All other new accounts start as members.</Text>}
+      {!backendApiEnabled && session.user && <ActionButton title="Sign out" secondary onPress={() => void session.signOut()} />}
     </Screen>
   </SafeAreaView>;
 }

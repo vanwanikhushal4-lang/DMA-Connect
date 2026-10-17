@@ -19,6 +19,7 @@
     "expo-linking": "~57.0.12",
     "expo-print": "~57.0.2",
     "expo-router": "~57.0.26",
+    "expo-secure-store": "~57.0.4",
     "expo-sharing": "~57.0.23",
     "expo-splash-screen": "~57.0.10",
     "expo-status-bar": "~57.0.1",
@@ -43,13 +44,13 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
-    "start": "node scripts/start-demo.cjs",
+    "start": "expo start --go",
     "start:live": "node scripts/start-live.cjs",
     "start:demo": "node scripts/start-demo.cjs",
     "emulators": "npx --yes firebase-tools@latest emulators:start --config firebase.test.json --only auth,firestore,functions,storage --project demo-dma-connect",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "node scripts/start-demo.cjs --web",
+    "web": "expo start --web",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",

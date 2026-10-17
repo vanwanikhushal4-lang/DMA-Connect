@@ -11,6 +11,7 @@ import type { OtpConfirmation } from '../services/phone-auth';
 import type { Account, Person, PersonDraft } from '../lib/community';
 import { toIsoDob } from '../lib/community';
 import { friendlyFirebaseError } from '../lib/firebase-errors';
+import { backendApiEnabled } from '../services/backend-api';
 
 type Value = {
   user: User | null; account: Account | null; profile: Person | null; loading: boolean; error: string; emailVerified: boolean;
@@ -21,8 +22,9 @@ type Value = {
 const Context = createContext<Value | null>(null);
 export function SessionProvider({ children }: PropsWithChildren) {
   const [user, setUser] = useState<User | null>(null), [account, setAccount] = useState<Account | null>(null), [profile, setProfile] = useState<Person | null>(null);
-  const [loading, setLoading] = useState(true), [error, setError] = useState(''), [emailVerified, setEmailVerified] = useState(false), [retryKey, setRetryKey] = useState(0);
+  const [loading, setLoading] = useState(!backendApiEnabled), [error, setError] = useState(''), [emailVerified, setEmailVerified] = useState(false), [retryKey, setRetryKey] = useState(0);
   useEffect(() => {
+    if (backendApiEnabled) return;
     let stopAccount: (() => void) | undefined, stopPerson: (() => void) | undefined;
     let generation = 0;
     let previousUid: string | undefined;

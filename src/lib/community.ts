@@ -45,7 +45,7 @@ export type WorkItem = { id: string; operation: 'addMember' | 'createInvitation'
 export function isStaff(account: Account | null) { return !!account && account.status === 'active' && account.role !== 'member'; }
 export function toIsoDob(display: string) { const [d, m, y] = display.split('/'); return y && m && d ? `${y}-${m}-${d}` : display; }
 export function displayDob(iso: string) { const [y, m, d] = iso.split('-'); return y && m && d ? `${d}/${m}/${y}` : iso; }
-export function validatePerson(draft: PersonDraft) {
+export function validatePerson(draft: PersonDraft, { requirePhoto = true }: { requirePhoto?: boolean } = {}) {
   const errors: Partial<Record<keyof PersonDraft, string>> = {};
   if (!draft.name.trim() || draft.name.trim().length > 120) errors.name = 'Enter a full name up to 120 characters.';
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim())) errors.email = 'Enter a valid email address.';
@@ -55,7 +55,7 @@ export function validatePerson(draft: PersonDraft) {
   const todayIndia = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso) || Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso || iso < '1900-01-01' || iso > todayIndia) errors.dob = 'Enter a valid date of birth that is not in the future.';
   if (!draft.areaId) errors.areaId = 'Choose a home area.';
-  if (!draft.photoPaths.length) errors.photoPaths = 'Add a profile photograph.';
+  if (requirePhoto && !draft.photoPaths.length) errors.photoPaths = 'Add a profile photograph.';
   for (const key of ['facebook', 'linkedin', 'instagram'] as const) {
     const value = draft.socials[key].trim();
     if (value && !(key === 'instagram' && /^@?[\w.]+$/.test(value))) {

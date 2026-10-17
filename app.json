@@ -63,7 +63,8 @@
         }
       ],
       "./plugins/with-ios-path-support.cjs",
-      "expo-sharing"
+      "expo-sharing",
+      "expo-secure-store"
     ]
   }
 }

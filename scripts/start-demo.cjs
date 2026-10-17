@@ -9,6 +9,7 @@ const host = process.env.EXPO_PUBLIC_FIREBASE_EMULATOR_HOST || addresses[0]?.add
 const env = {
   ...process.env,
   EXPO_PUBLIC_USE_FIREBASE_EMULATORS: 'true',
+  EXPO_PUBLIC_BACKEND_API_URL: '',
   EXPO_PUBLIC_FIREBASE_EMULATOR_HOST: host,
   FIREBASE_AUTH_EMULATOR_HOST: `${host}:9099`,
   FIRESTORE_EMULATOR_HOST: `${host}:8180`,

@@ -34,6 +34,7 @@ firestore-debug.log*
 
 # local env files
 .env*.local
+.env.development
 functions/.env*
 !functions/.env.example
 

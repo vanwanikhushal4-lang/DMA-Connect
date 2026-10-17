@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import { useSession } from './SessionContext';
 import { isStaff } from '../lib/community';
 import type { Account, Affiliation, AffiliationRequest, Committee, Invitation } from '../lib/community';
+import { backendApiEnabled } from '../services/backend-api';
 
 export type StaffState = { requests: AffiliationRequest[]; invitations: Invitation[]; presidents: Account[]; total: number; affiliationTotal: number; allCommittees?: Committee[] };
 type Value = { committees: Committee[]; committeesLoading: boolean; catalogueError: string; myRequests: AffiliationRequest[]; affiliations: Affiliation[]; staffState: StaffState | null; staffError: string; refresh: () => Promise<void>; revision: number };
@@ -20,7 +21,7 @@ function OwnedCommunity({ children }: PropsWithChildren) {
   const [committees, setCommittees] = useState<Committee[]>([]), [committeesLoading, setLoading] = useState(true), [catalogueError, setCatalogueError] = useState('');
   const [myRequests, setRequests] = useState<AffiliationRequest[]>([]), [affiliations, setAffiliations] = useState<Affiliation[]>([]);
   const [staffState, setStaff] = useState<StaffState | null>(null), [staffError, setError] = useState(''), [revision, setRevision] = useState(0);
-  const uid = user?.uid, staffAccount = isStaff(account), personId = account?.personId;
+  const uid = backendApiEnabled ? undefined : user?.uid, staffAccount = isStaff(account), personId = account?.personId;
   useEffect(() => {
     if (!uid) return;
     return onSnapshot(query(collection(db, 'committees'), where('active', '==', true)), snapshot => {
